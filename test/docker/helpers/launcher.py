@@ -21,7 +21,18 @@ def launcher_pids():
                     pids.append(int(p))
         except OSError:
             pass
-    return pids
+    # Лаунчер запускает дочерние процессы через fork → exec: до exec у потомка
+    # та же командная строка, что у лаунчера. Главный — тот, чей родитель сам
+    # не процесс лаунчера.
+    return [p for p in pids if _ppid(p) not in pids]
+
+
+def _ppid(pid):
+    try:
+        with open(f'/proc/{pid}/stat') as f:
+            return int(f.read().rsplit(')', 1)[1].split()[1])
+    except (OSError, ValueError, IndexError):
+        return None
 
 
 def launcher_log():
