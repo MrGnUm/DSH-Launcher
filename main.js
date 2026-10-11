@@ -31,6 +31,7 @@ const os = require('os');
 const path = require('path');
 
 const execFileAsync = promisify(execFile);
+const state = require('./src/state'); // общее состояние (окно, процесс dsh, флаги)
 const i18n = require('./src/i18n');
 const { tr } = i18n;
 const { splitArgs, firstErrLine, esc, profileFromArgs, timedCheck, launcherRoute, redactLog } = require('./src/util');
@@ -80,7 +81,7 @@ const DSH_BIN_DEFAULT = '/usr/bin/dsh';
 // /usr/bin/dsh нет, — ищется в PATH, npm prefix, nvm и т.п. (см. findDsh),
 // найденный путь запоминается
 const DSH_BIN_EXPLICIT = Boolean(CONFIG.dshBin);
-let DSH_BIN = CONFIG.dshBin || DSH_BIN_DEFAULT;
+state.dshBin = CONFIG.dshBin || DSH_BIN_DEFAULT;
 const DSH_ARGS = CONFIG.args;
 const CWD = CONFIG.cwd; // рабочая директория для dsh
 const HOST = '127.0.0.1';
@@ -293,14 +294,14 @@ app.on('child-process-gone', (_event, details) => {
   }
 });
 
-let win = null;
-let dshProc = null;
-let weStartedDsh = false;
-let adoptedDsh = false; // dsh «усыновлён» после самовозрождения — тоже останавливаем при закрытии
-let adoptedOldPgid = null; // группа исходного dsh до самовозрождения (могли остаться потомки)
-let dshFatal = false;
-let stopping = false;
-let authUrl = null; // URL с токеном, напечатанный dsh
+state.win = null;
+state.dshProc = null;
+state.weStartedDsh = false;
+state.adoptedDsh = false; // dsh «усыновлён» после самовозрождения — тоже останавливаем при закрытии
+state.adoptedOldPgid = null; // группа исходного dsh до самовозрождения (могли остаться потомки)
+state.dshFatal = false;
+state.stopping = false;
+state.authUrl = null; // URL с токеном, напечатанный dsh
 const stderrTail = [];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -332,7 +333,7 @@ async function waitForPort() {
   const deadline = Date.now() + START_TIMEOUT;
   while (Date.now() < deadline) {
     if (await portOpen()) return true;
-    if (dshProc && (dshProc.exitCode !== null || dshFatal)) return false;
+    if (state.dshProc && (state.dshProc.exitCode !== null || state.dshFatal)) return false;
     await sleep(400);
   }
   return portOpen();
@@ -340,8 +341,8 @@ async function waitForPort() {
 
 async function waitForAuthUrl(timeoutMs = 20000) {
   const deadline = Date.now() + timeoutMs;
-  while (!authUrl && Date.now() < deadline) await sleep(100);
-  return authUrl;
+  while (!state.authUrl && Date.now() < deadline) await sleep(100);
+  return state.authUrl;
 }
 
 /* ---------------- проверка установки dsh ---------------- */
@@ -350,7 +351,7 @@ async function waitForAuthUrl(timeoutMs = 20000) {
 // `#!/usr/bin/env node`-скрипт; установленный через nvm, он должен получить
 // node из того же каталога, а при запуске с ярлыка nvm в PATH нет.
 function dshEnv(extra) {
-  return envWithBinDir(DSH_BIN, extra);
+  return envWithBinDir(state.dshBin, extra);
 }
 
 
@@ -384,7 +385,7 @@ function nvmBinDirs() {
 // Исполняемый файл: рядом с dsh, в PATH, иначе в nvm (при запуске с ярлыка
 // nvm в PATH нет).
 function findBin(name) {
-  const dirs = [path.dirname(DSH_BIN)]
+  const dirs = [path.dirname(state.dshBin)]
     .concat(String(process.env.PATH || '').split(path.delimiter).filter(Boolean), nvmBinDirs());
   for (const dir of dirs) {
     const bin = path.join(dir, name);
@@ -415,13 +416,13 @@ function dshCandidates() {
 // Если DSH_BIN не задан явно — перебираем кандидатов (dshCandidates) и
 // переключаем DSH_BIN на первый рабочий, запоминая его в userData/dsh-bin.json.
 async function dshInstallCheck() {
-  if (DSH_BIN_EXPLICIT) return probeDsh(DSH_BIN);
+  if (DSH_BIN_EXPLICIT) return probeDsh(state.dshBin);
   let firstBroken = null;
   const tryBin = async (bin) => {
     const r = await probeDsh(bin);
     if (r.ok) {
-      if (bin !== DSH_BIN) console.log(`[launcher] dsh найден: ${bin} (${r.version})`);
-      DSH_BIN = bin;
+      if (bin !== state.dshBin) console.log(`[launcher] dsh найден: ${bin} (${r.version})`);
+      state.dshBin = bin;
       try {
         fs.mkdirSync(path.dirname(dshBinPrefFile()), { recursive: true });
         fs.writeFileSync(dshBinPrefFile(), JSON.stringify({ bin }));
@@ -444,10 +445,10 @@ async function dshInstallCheck() {
     } catch { /* npm не отвечает */ }
   }
   if (firstBroken) {
-    DSH_BIN = firstBroken.bin; // показываем на странице тот, что сломан
+    state.dshBin = firstBroken.bin; // показываем на странице тот, что сломан
     return { ok: false, reason: 'broken', detail: firstBroken.detail };
   }
-  DSH_BIN = DSH_BIN_DEFAULT;
+  state.dshBin = DSH_BIN_DEFAULT;
   return { ok: false, reason: 'missing' };
 }
 
@@ -508,8 +509,8 @@ function startDsh() {
   if (rotated) console.log(`[launcher] лог прокручен: dsh.log (${rotated} Б) -> dsh.log.1`);
   fs.mkdirSync(LOG_DIR, { recursive: true });
   const logStream = openDshLog(LOG_FILE);
-  authUrl = null; // токен прошлого процесса недействителен — ждём новый
-  console.log(`[launcher] starting: ${DSH_BIN} ${DSH_ARGS.join(' ')} (cwd=${CWD}, log=${LOG_FILE})`);
+  state.authUrl = null; // токен прошлого процесса недействителен — ждём новый
+  console.log(`[launcher] starting: ${state.dshBin} ${DSH_ARGS.join(' ')} (cwd=${CWD}, log=${LOG_FILE})`);
   const opts = {
     cwd: CWD,
     env: dshEnv({ DSH_STARTED_BY: 'dsh-launcher' }),
@@ -519,13 +520,13 @@ function startDsh() {
   // Через bash (spawnClean) ошибку «нет такой программы» spawn не вернёт —
   // такую (и команду без пути, из PATH) запускаем напрямую: 'error' как раньше.
   let direct = false;
-  try { fs.accessSync(DSH_BIN, fs.constants.X_OK); } catch { direct = true; }
-  dshProc = direct || !path.isAbsolute(DSH_BIN) ? spawn(DSH_BIN, DSH_ARGS, opts) : spawnClean(DSH_BIN, DSH_ARGS, opts);
-  weStartedDsh = true;
-  adoptedDsh = false; // снова собственный процесс — «усыновлённого» больше нет
-  adoptedOldPgid = null;
-  dshFatal = false;
-  dshProc.stdout.on('data', (d) => {
+  try { fs.accessSync(state.dshBin, fs.constants.X_OK); } catch { direct = true; }
+  state.dshProc = direct || !path.isAbsolute(state.dshBin) ? spawn(state.dshBin, DSH_ARGS, opts) : spawnClean(state.dshBin, DSH_ARGS, opts);
+  state.weStartedDsh = true;
+  state.adoptedDsh = false; // снова собственный процесс — «усыновлённого» больше нет
+  state.adoptedOldPgid = null;
+  state.dshFatal = false;
+  state.dshProc.stdout.on('data', (d) => {
     for (const line of d.toString().split('\n')) {
       if (!line.trim()) continue;
       console.log('[dsh]', line.trim());
@@ -534,24 +535,24 @@ function startDsh() {
                 /(https?:\/\/[^\s]*\?token=[^\s&]+)/.exec(line);
       if (m) {
         console.log('[launcher] captured auth URL');
-        authUrl = m[1];
+        state.authUrl = m[1];
       }
     }
   });
-  dshProc.stderr.on('data', (d) => {
+  state.dshProc.stderr.on('data', (d) => {
     for (const line of d.toString().split('\n')) {
       pushErr(line);
       logStream.write(line + '\n');
     }
   });
-  dshProc.on('error', (err) => {
-    dshFatal = true;
+  state.dshProc.on('error', (err) => {
+    state.dshFatal = true;
     pushErr(tr(`ошибка запуска dsh: ${err.message}`, `failed to start dsh: ${err.message}`));
   });
-  const proc = dshProc;
-  dshProc.on('exit', (code, signal) => {
+  const proc = state.dshProc;
+  state.dshProc.on('exit', (code, signal) => {
     try { logStream.end(); } catch { /* noop */ }
-    if (proc !== dshProc || restartingDsh) { // остановлен «Перезапустить dsh» — это не сбой
+    if (proc !== state.dshProc || restartingDsh) { // остановлен «Перезапустить dsh» — это не сбой
       console.log('[launcher] прежний процесс dsh завершился (перезапуск):', { code, signal });
       return;
     }
@@ -574,13 +575,13 @@ function killGroup(pid, signal, groupOnly = false) {
 
 // Главный процесс dsh завершился (по коду или по сигналу).
 function dshLeaderExited() {
-  return dshProc.exitCode !== null || dshProc.signalCode !== null;
+  return state.dshProc.exitCode !== null || state.dshProc.signalCode !== null;
 }
 
 async function stopDsh() {
-  if (!weStartedDsh || !dshProc || dshProc.pid === undefined) return;
-  const pid = dshProc.pid;
-  if (dshFatal) return; // spawn не удался — процесса не было
+  if (!state.weStartedDsh || !state.dshProc || state.dshProc.pid === undefined) return;
+  const pid = state.dshProc.pid;
+  if (state.dshFatal) return; // spawn не удался — процесса не было
   const groupOnly = dshLeaderExited();
   if (!groupAlive(pid, groupOnly)) return; // группа уже мёртва — нечего убивать
   killGroup(pid, 'SIGTERM', groupOnly);
@@ -611,7 +612,7 @@ async function stopDsh() {
 
 function adoptedTargets() {
   const pid = portListenerPid(PORT);
-  return pickKillTargets(pid, pid ? pgidOf(pid) : null, pgidOf(process.pid), adoptedOldPgid);
+  return pickKillTargets(pid, pid ? pgidOf(pid) : null, pgidOf(process.pid), state.adoptedOldPgid);
 }
 
 async function stopAdoptedDsh() {
@@ -644,7 +645,7 @@ let adoptionCheck = false;
 
 async function handleDshExit(code, signal) {
   console.log('[launcher] dsh process exited:', { code, signal });
-  if (stopping) return;
+  if (state.stopping) return;
   pushErr(tr(`dsh остановился (code=${code}, signal=${signal})`, `dsh stopped (code=${code}, signal=${signal})`));
   if (adoptionCheck) return; // на всякий случай: один цикл проверки
   adoptionCheck = true;
@@ -657,21 +658,21 @@ async function handleDshExit(code, signal) {
     const deadline = Date.now() + 8000;
     let up = await portOpen();
     while (!up && Date.now() < deadline) { await sleep(500); up = await portOpen(); }
-    if (up && !stopping && win && !win.isDestroyed()) {
+    if (up && !state.stopping && state.win && !state.win.isDestroyed()) {
       console.log('[launcher] порт снова открыт — dsh перезапустился сам, перехожу в режим подключения');
-      weStartedDsh = false; // новый процесс — не наш дочерний (ручки на него нет)
-      adoptedDsh = true;    // но это тот же dsh сессии — при закрытии окна остановим
-      if (dshProc && dshProc.pid !== undefined) adoptedOldPgid = dshProc.pid;
-      dshProc = null;
-      dshFatal = false;
-      portState = 'up';     // синхронизация со watchdog — не давать лишней перезагрузки
+      state.weStartedDsh = false; // новый процесс — не наш дочерний (ручки на него нет)
+      state.adoptedDsh = true;    // но это тот же dsh сессии — при закрытии окна остановим
+      if (state.dshProc && state.dshProc.pid !== undefined) state.adoptedOldPgid = state.dshProc.pid;
+      state.dshProc = null;
+      state.dshFatal = false;
+      state.portState = 'up';     // синхронизация со watchdog — не давать лишней перезагрузки
       await recoverWindow(true);
       return;
     }
   } finally {
     adoptionCheck = false;
   }
-  if (win && !win.isDestroyed() && !stopping) {
+  if (state.win && !state.win.isDestroyed() && !state.stopping) {
     showPage(() => showStatus(tr('dsh остановился', 'dsh has stopped'), tr(
       `<p>Процесс DeepSeek Harness завершился, и за 8 секунд новый процесс
          не запустился.</p>`,
@@ -784,10 +785,10 @@ function stderrBlock() {
 // Текущая служебная страница как функция отрисовки: переключатель RU | EN
 // перерисовывает её на новом языке. Каждая show*-страница регистрирует себя
 // сама; разовые showStatus оборачиваются в showPage.
-let currentPage = null;
+state.currentPage = null;
 
 function showPage(render) {
-  currentPage = render;
+  state.currentPage = render;
   render();
 }
 
@@ -811,16 +812,16 @@ function onLangSwitch(lang) {
     console.log(`[launcher] язык окна: ${lang}`);
   }
   buildAppMenu(); // подписи меню на новом языке
-  if (currentPage) currentPage();
+  if (state.currentPage) state.currentPage();
   return blankResponse();
 }
 
 // Загрузка в окно. ERR_ABORTED (-3) — не ошибка: эту навигацию сменила
 // более новая (статус-страница, watchdog), окно уже показывает её.
 async function loadInWin(url) {
-  if (!win || win.isDestroyed()) return;
+  if (!state.win || state.win.isDestroyed()) return;
   try {
-    await win.loadURL(url);
+    await state.win.loadURL(url);
   } catch (e) {
     if (e.code === 'ERR_ABORTED' || e.errno === -3) {
       console.log(`[launcher] загрузка ${String(url).slice(0, 40)}… прервана более новой навигацией`);
@@ -835,7 +836,7 @@ function showStatus(title, body, isError) {
 }
 
 function showPastePage() {
-  currentPage = showPastePage;
+  state.currentPage = showPastePage;
   const body = `
     ${tr(`<p>Похоже, <code>dsh</code> уже запущен, но у окна нет валидного сессионного куки
        (он мог истечь или dsh был перезапущен с другим секретом).</p>
@@ -885,12 +886,12 @@ async function refreshInstallState() {
 }
 
 async function showInstallPage(note, noteIsError = false) {
-  if (!win || win.isDestroyed()) return;
-  currentPage = () => showInstallPage(note, noteIsError);
+  if (!state.win || state.win.isDestroyed()) return;
+  state.currentPage = () => showInstallPage(note, noteIsError);
   if (typeof note === 'function') note = note();
   if (!installState.running) {
     try { await refreshInstallState(); } catch (e) { console.error('[launcher] refreshInstallState:', e.message); }
-    if (!win || win.isDestroyed() || !installState.check) return;
+    if (!state.win || state.win.isDestroyed() || !installState.check) return;
   }
   const check = installState.check;
   const npmInfo = installState.npmInfo;
@@ -904,13 +905,13 @@ async function showInstallPage(note, noteIsError = false) {
       ? tr(`Лаунчер не может запустить DeepSeek Harness: идёт установка <code>dsh</code>.`,
            `The launcher cannot start DeepSeek Harness: <code>dsh</code> is being installed.`)
       : check.reason === 'missing' && DSH_BIN_EXPLICIT
-        ? tr(`Лаунчер не может запустить DeepSeek Harness: по пути <code>${esc(DSH_BIN)}</code> бинарника <code>dsh</code> нет.`,
-             `The launcher cannot start DeepSeek Harness: there is no <code>dsh</code> binary at <code>${esc(DSH_BIN)}</code>.`)
+        ? tr(`Лаунчер не может запустить DeepSeek Harness: по пути <code>${esc(state.dshBin)}</code> бинарника <code>dsh</code> нет.`,
+             `The launcher cannot start DeepSeek Harness: there is no <code>dsh</code> binary at <code>${esc(state.dshBin)}</code>.`)
       : check.reason === 'missing'
         ? tr(`Лаунчер не нашёл <code>dsh</code>: искал <code>${DSH_BIN_DEFAULT}</code>, в PATH, в каталогах npm и nvm.`,
              `The launcher could not find <code>dsh</code>: looked at <code>${DSH_BIN_DEFAULT}</code>, in PATH, and in npm and nvm directories.`)
-        : tr(`Лаунчер не может запустить DeepSeek Harness: бинарник <code>${esc(DSH_BIN)}</code> не запускается.`,
-             `The launcher cannot start DeepSeek Harness: the <code>${esc(DSH_BIN)}</code> binary fails to run.`)}</p>
+        : tr(`Лаунчер не может запустить DeepSeek Harness: бинарник <code>${esc(state.dshBin)}</code> не запускается.`,
+             `The launcher cannot start DeepSeek Harness: the <code>${esc(state.dshBin)}</code> binary fails to run.`)}</p>
     ${!installing && check.detail ? `<p>${tr('Детали', 'Details')}: <code>${esc(check.detail)}</code></p>` : ''}
     ${installing
       ? `<p>${tr('Последние строки установки:', 'Latest install output:')}</p>\n     <pre>` + esc(installState.log.slice(-40).join('\n') || '…') + '</pre>'
@@ -981,11 +982,11 @@ function marketPromptDisabled() {
 let marketState = { resolve: null, running: false, log: [], timer: null, proc: null, cmdLine: null };
 
 function marketCommand() {
-  return `${DSH_BIN} plugin --profile ${DSH_PROFILE} add ${MARKET_PKG}`;
+  return `${state.dshBin} plugin --profile ${DSH_PROFILE} add ${MARKET_PKG}`;
 }
 
 function showMarketPage(note, noteIsError = false) {
-  currentPage = () => showMarketPage(note, noteIsError);
+  state.currentPage = () => showMarketPage(note, noteIsError);
   if (typeof note === 'function') note = note();
   const installing = marketState.running;
   const noteHtml = note
@@ -1081,7 +1082,7 @@ async function offerMarketIfMissing() {
   let noteIsError = false;
   for (;;) {
     const choice = await askMarket(note, noteIsError);
-    if (stopping) return;
+    if (state.stopping) return;
     if (choice === 'never') {
       try {
         fs.mkdirSync(path.dirname(marketPrefFile()), { recursive: true });
@@ -1097,7 +1098,7 @@ async function offerMarketIfMissing() {
     // dsh plugin add требует pnpm: на чистой системе его нет (код 127).
     if (!findBin('pnpm')) {
       const npmInfo = await npmInstallInfo();
-      if (stopping) return;
+      if (state.stopping) return;
       if (!npmInfo.canAuto) {
         const cmd = npmInfo.hasNpm ? 'sudo npm install -g pnpm' : 'npm install -g pnpm';
         console.log(`[launcher] pnpm нет, поставить сами не можем — прошу «${cmd}»`);
@@ -1109,7 +1110,7 @@ async function offerMarketIfMissing() {
       }
       console.log('[launcher] pnpm нет — ставлю через npm');
       const pc = await runMarketInstall(npmInfo.npm, ['install', '-g', 'pnpm'], envWithBinDir(npmInfo.npm));
-      if (stopping) return;
+      if (state.stopping) return;
       if (pc !== 0 || !findBin('pnpm')) {
         console.error(`[launcher] установка pnpm не удалась (код ${pc})`);
         note = () => tr(`Не удалось установить pnpm (код ${pc}). Можно повторить или продолжить без маркета.`,
@@ -1118,8 +1119,8 @@ async function offerMarketIfMissing() {
         continue;
       }
     }
-    const code = await runMarketInstall(DSH_BIN, ['plugin', '--profile', DSH_PROFILE, 'add', MARKET_PKG], marketEnv());
-    if (stopping) return;
+    const code = await runMarketInstall(state.dshBin, ['plugin', '--profile', DSH_PROFILE, 'add', MARKET_PKG], marketEnv());
+    if (state.stopping) return;
     if (code === 0 && marketInstalled()) {
       console.log(`[launcher] ${MARKET_PKG} установлен`);
       return;
@@ -1415,8 +1416,8 @@ function updateDismiss(kind, version) {
 }
 
 function showUpdatePage(note, noteIsError = false) {
-  if (!win || win.isDestroyed()) return;
-  currentPage = () => showUpdatePage(note, noteIsError);
+  if (!state.win || state.win.isDestroyed()) return;
+  state.currentPage = () => showUpdatePage(note, noteIsError);
   if (typeof note === 'function') note = note();
   const kind = updateState.kind;
   const mode = updateState.mode;
@@ -1620,19 +1621,19 @@ async function downloadDeb(url, expectedSha256) {
 // Перезапуск после обновления лаунчера: отпускаем single-instance лок, чтобы
 // новый экземпляр сразу его взял, запускаем новый отсоединённым (он
 // переживёт наш выход) и закрываемся штатно — через before-quit.
-let restarting = false;
+state.restarting = false;
 
 function restartLauncher() {
-  if (restarting || stopping) return;
-  restarting = true;
+  if (state.restarting || state.stopping) return;
+  state.restarting = true;
   const exe = process.env.DSH_LAUNCHER_RESTART_BIN || '/usr/bin/dsh-launcher';
   app.releaseSingleInstanceLock();
   let started = false;
   const fail = (e) => {
-    restarting = false;
+    state.restarting = false;
     launcherUpdatedOnDisk = false; // не перезапускаться заново на каждом падении процесса
     app.requestSingleInstanceLock(); // остаёмся единственным экземпляром
-    if (stopping) return;
+    if (state.stopping) return;
     console.error('[launcher] авто-перезапуск не удался:', e.message);
     showUpdatePage(
       tr(`Не удалось запустить новую версию: ${e.message}. Обновление уже установлено — перезапустите лаунчер вручную.`,
@@ -1718,7 +1719,7 @@ async function offerLauncherUpdate() {
   for (;;) {
     const choice = auto ? 'install' : await askUpdate(note, noteIsError);
     auto = false;
-    if (stopping) return;
+    if (state.stopping) return;
     note = null;
     noteIsError = false;
     if (choice === 'never') {
@@ -1753,7 +1754,7 @@ async function offerLauncherUpdate() {
       continue;
     }
     const dl = await downloadDeb(latest.assetUrl, latest.assetSha256);
-    if (stopping) return;
+    if (state.stopping) return;
     if (!dl.ok) {
       updateState.mode = 'manual';
       updateState.manualCmd = `curl -L -o dsh-launcher.deb ${latest.assetUrl} && sudo apt install -y ./dsh-launcher.deb`;
@@ -1772,7 +1773,7 @@ async function offerLauncherUpdate() {
       continue;
     }
     const code = await runUpdateStep(pkexec, ['/bin/sh', '-c', ROOT_INSTALL_SH, 'sh', dl.path, dl.sha256]);
-    if (stopping) return;
+    if (state.stopping) return;
     if (code === 0) {
       console.log(`[launcher] dsh-launcher ${latest.version} установлен`);
       showUpdateSuccess();
@@ -1791,26 +1792,26 @@ async function offerLauncherUpdate() {
 
 // Текущая версия dsh: из dshInstallCheck при старте (onReady); если почему-
 // то нет — пробинуем саму команду.
-let dshInstalledVersion = null;
+state.dshInstalledVersion = null;
 
 async function offerDshUpdate() {
   const latest = await updateChecks.dsh;
   if (!latest || !latest.version) return;
-  if (!dshInstalledVersion) {
-    const r = await probeDsh(DSH_BIN);
+  if (!state.dshInstalledVersion) {
+    const r = await probeDsh(state.dshBin);
     if (!r.ok) return;
-    dshInstalledVersion = r.version;
+    state.dshInstalledVersion = r.version;
   }
-  if (compareSemVer(latest.version, dshInstalledVersion) <= 0) return;
+  if (compareSemVer(latest.version, state.dshInstalledVersion) <= 0) return;
   if (UPDATE_NOW !== 'dsh' && updateDismissed('dsh', latest.version)) {
     console.log(`[launcher] обновление dsh до ${latest.version} отклонено — не спрашиваю`);
     return;
   }
-  console.log(`[launcher] новый ${DSH_NPM_PKG}: ${latest.version} (установлен ${dshInstalledVersion})`);
+  console.log(`[launcher] новый ${DSH_NPM_PKG}: ${latest.version} (установлен ${state.dshInstalledVersion})`);
   updateState.kind = 'dsh';
   updateState.notes = []; // у npm нет описаний версий — только ссылка на пакет
   updateState.latest = latest.version;
-  updateState.installed = dshInstalledVersion;
+  updateState.installed = state.dshInstalledVersion;
   updateState.htmlUrl = latest.htmlUrl;
   updateState.mode = 'ask';
   updateState.debPath = null;
@@ -1822,7 +1823,7 @@ async function offerDshUpdate() {
   for (;;) {
     const choice = auto ? 'install' : await askUpdate(note, noteIsError);
     auto = false;
-    if (stopping) return;
+    if (state.stopping) return;
     note = null;
     noteIsError = false;
     if (choice === 'never') {
@@ -1834,9 +1835,9 @@ async function offerDshUpdate() {
       return;
     }
     if (choice === 'recheck') {
-      const r = await probeDsh(DSH_BIN);
+      const r = await probeDsh(state.dshBin);
       if (r.ok && compareSemVer(r.version, latest.version) >= 0) {
-        dshInstalledVersion = r.version;
+        state.dshInstalledVersion = r.version;
         console.log(`[launcher] dsh обновлён до ${r.version} (в терминале)`);
         return;
       }
@@ -1849,7 +1850,7 @@ async function offerDshUpdate() {
     }
     // choice === 'install'
     const npmInfo = await npmInstallInfo();
-    if (stopping) return;
+    if (state.stopping) return;
     if (!npmInfo.hasNpm || !npmInfo.canAuto) {
       // Глобальный prefix недоступен без sudo (или npm нет) — команда для
       // терминала.
@@ -1869,21 +1870,21 @@ async function offerDshUpdate() {
       continue;
     }
     const code = await runUpdateStep(npmInfo.npm, ['install', '-g', `${DSH_NPM_PKG}@${latest.version}`], envWithBinDir(npmInfo.npm));
-    if (stopping) return;
+    if (state.stopping) return;
     if (code === 0) {
-      const r = await probeDsh(DSH_BIN);
-      if (r.ok) dshInstalledVersion = r.version;
+      const r = await probeDsh(state.dshBin);
+      if (r.ok) state.dshInstalledVersion = r.version;
       if (r.ok && compareSemVer(r.version, latest.version) >= 0) {
         console.log(`[launcher] ${DSH_NPM_PKG} обновлён → ${r.version}; dsh стартует с новой версией`);
         return;
       }
       // npm отработал, но запускаемый dsh — прежний: npm ставит в другой
       // prefix (например, dsh из nvm, а npm — системный).
-      console.error(`[launcher] npm install прошёл, но ${DSH_BIN} — ${r.ok ? r.version : 'не запускается'} (prefix npm: ${npmInfo.prefix})`);
+      console.error(`[launcher] npm install прошёл, но ${state.dshBin} — ${r.ok ? r.version : 'не запускается'} (prefix npm: ${npmInfo.prefix})`);
       updateState.mode = 'manual';
       updateState.manualCmd = cmdAuto;
-      note = tr(`npm поставил пакет в ${npmInfo.prefix || 'свой prefix'}, но лаунчер запускает ${DSH_BIN} (версия ${r.ok ? r.version : 'неизвестна'}). Обновите dsh тем npm, которым он был установлен, и нажмите «Проверить ещё раз».`,
-                `npm installed the package into ${npmInfo.prefix || 'its prefix'}, but the launcher runs ${DSH_BIN} (version ${r.ok ? r.version : 'unknown'}). Update dsh with the npm it was installed with and click "Check again".`);
+      note = tr(`npm поставил пакет в ${npmInfo.prefix || 'свой prefix'}, но лаунчер запускает ${state.dshBin} (версия ${r.ok ? r.version : 'неизвестна'}). Обновите dsh тем npm, которым он был установлен, и нажмите «Проверить ещё раз».`,
+                `npm installed the package into ${npmInfo.prefix || 'its prefix'}, but the launcher runs ${state.dshBin} (version ${r.ok ? r.version : 'unknown'}). Update dsh with the npm it was installed with and click "Check again".`);
       noteIsError = true;
       continue;
     }
@@ -1982,7 +1983,7 @@ function appMenuTemplate() {
 function buildAppMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate()));
   // На Linux setApplicationMenu ставит меню всем окнам — у окна-диалога его быть не должно.
-  if (dialogWin && !dialogWin.isDestroyed()) dialogWin.setMenu(null);
+  if (state.dialogWin && !state.dialogWin.isDestroyed()) state.dialogWin.setMenu(null);
   if (tray) tray.setContextMenu(trayMenu());
 }
 
@@ -1994,7 +1995,7 @@ function buildAppMenu() {
 let openContextMenu = null;
 
 /* ===== showContextMenu (тест test/menu.js, с подставными win/Menu/clipboard) ===== */
-function showContextMenu(params, w = win) {
+function showContextMenu(params, w = state.win) {
   if (!w || w.isDestroyed()) return;
   const wc = w.webContents;
   const run = {
@@ -2049,10 +2050,10 @@ function dshPackageVersion(bin) {
 }
 
 async function dshVersionRaw() {
-  const v = (DSH_BIN && dshPackageVersion(DSH_BIN)) || dshInstalledVersion;
+  const v = (state.dshBin && dshPackageVersion(state.dshBin)) || state.dshInstalledVersion;
   if (v) return v;
-  if (DSH_BIN) {
-    const r = await probeDsh(DSH_BIN);
+  if (state.dshBin) {
+    const r = await probeDsh(state.dshBin);
     if (r.ok) return r.version;
   }
   return null;
@@ -2104,9 +2105,9 @@ const zoomFile = () => path.join(app.getPath('userData'), 'zoom-level.json');
 let zoomSaveTimer = null;
 
 function applyZoom(level, note) {
-  if (!win || win.isDestroyed()) return;
+  if (!state.win || state.win.isDestroyed()) return;
   const z = Math.max(-5, Math.min(5, level));
-  win.webContents.setZoomLevel(z);
+  state.win.webContents.setZoomLevel(z);
   clearTimeout(zoomSaveTimer);
   zoomSaveTimer = setTimeout(() => {
     try { fs.writeFileSync(zoomFile(), JSON.stringify({ zoomLevel: z })); } catch { /* noop */ }
@@ -2114,17 +2115,17 @@ function applyZoom(level, note) {
   if (note) console.log(`[launcher] ${note}`);
 }
 
-const zoomOf = () => (win && !win.isDestroyed() ? win.webContents.getZoomLevel() : 0);
+const zoomOf = () => (state.win && !state.win.isDestroyed() ? state.win.webContents.getZoomLevel() : 0);
 const viewActions = {
-  reload: () => { win.webContents.reload(); console.log('[launcher] перезагрузка страницы'); },
-  reloadHard: () => { win.webContents.reloadIgnoringCache(); console.log('[launcher] перезагрузка страницы без кэша'); },
+  reload: () => { state.win.webContents.reload(); console.log('[launcher] перезагрузка страницы'); },
+  reloadHard: () => { state.win.webContents.reloadIgnoringCache(); console.log('[launcher] перезагрузка страницы без кэша'); },
   zoomIn: () => applyZoom(zoomOf() + 0.5),
   zoomOut: () => applyZoom(zoomOf() - 0.5),
   zoomReset: () => applyZoom(0, 'масштаб сброшен'),
   find: () => openFind(),
   findNext: () => findStep(true),
   findPrev: () => findStep(false),
-  fullscreen: () => win.setFullScreen(!win.isFullScreen()),
+  fullscreen: () => state.win.setFullScreen(!state.win.isFullScreen()),
   settings: () => showSettingsDialog(),
 };
 
@@ -2171,8 +2172,8 @@ function findBarUrl() {
 }
 
 function placeFind() {
-  if (!findView || !win || win.isDestroyed()) return;
-  const [cw] = win.getContentSize();
+  if (!findView || !state.win || state.win.isDestroyed()) return;
+  const [cw] = state.win.getContentSize();
   findView.setBounds({ x: Math.max(0, cw - FIND_W - 18), y: 10, width: Math.min(FIND_W, cw), height: FIND_H });
 }
 
@@ -2182,18 +2183,18 @@ function setFindCount(text) {
 }
 
 function openFind() {
-  if (!win || win.isDestroyed() || stopping) return;
+  if (!state.win || state.win.isDestroyed() || state.stopping) return;
   if (!findView) {
     findView = new WebContentsView({ webPreferences: { contextIsolation: true, nodeIntegration: false, spellcheck: false } });
     findView.setBackgroundColor('#00000000');
     findView.webContents.loadURL(findBarUrl()).catch(() => {});
-    win.contentView.addChildView(findView);
-    win.on('resize', placeFind);
-    win.webContents.on('found-in-page', (_e, r) => {
+    state.win.contentView.addChildView(findView);
+    state.win.on('resize', placeFind);
+    state.win.webContents.on('found-in-page', (_e, r) => {
       if (r.finalUpdate) setFindCount(r.matches ? `${r.activeMatchOrdinal} / ${r.matches}` : tr('нет', 'none'));
     });
     // Ушли на другую страницу — старые совпадения неактуальны.
-    win.webContents.on('did-navigate', () => { if (findText) { findText = ''; closeFind(); } });
+    state.win.webContents.on('did-navigate', () => { if (findText) { findText = ''; closeFind(); } });
   }
   placeFind();
   findView.setVisible(true);
@@ -2203,23 +2204,23 @@ function openFind() {
 }
 
 function findQuery(text) {
-  if (!win || win.isDestroyed()) return;
+  if (!state.win || state.win.isDestroyed()) return;
   findText = text;
-  if (!text) { win.webContents.stopFindInPage('clearSelection'); setFindCount(''); return; }
-  win.webContents.findInPage(text, { findNext: true });
+  if (!text) { state.win.webContents.stopFindInPage('clearSelection'); setFindCount(''); return; }
+  state.win.webContents.findInPage(text, { findNext: true });
 }
 
 function findStep(forward) {
   if (!findView || !findView.getVisible()) return openFind();
-  if (findText) win.webContents.findInPage(findText, { forward, findNext: false });
+  if (findText) state.win.webContents.findInPage(findText, { forward, findNext: false });
 }
 
 function closeFind() {
-  if (!findView || !win || win.isDestroyed()) return;
-  win.webContents.stopFindInPage('keepSelection');
+  if (!findView || !state.win || state.win.isDestroyed()) return;
+  state.win.webContents.stopFindInPage('keepSelection');
   findView.setVisible(false);
   placeToast();
-  win.webContents.focus();
+  state.win.webContents.focus();
 }
 
 function onFindRequest(route, url) {
@@ -2267,9 +2268,9 @@ async function openLogsFolder() {
 let restartingDsh = false;
 
 async function restartDsh({ confirm = true } = {}) {
-  if (!win || win.isDestroyed() || stopping || launching || restartingDsh) return;
-  if (!weStartedDsh && !adoptedDsh) {
-    await dialog.showMessageBox(win, {
+  if (!state.win || state.win.isDestroyed() || state.stopping || state.launching || restartingDsh) return;
+  if (!state.weStartedDsh && !state.adoptedDsh) {
+    await dialog.showMessageBox(state.win, {
       type: 'info',
       title: tr('Перезапуск dsh', 'Restart dsh'),
       message: tr('Этот dsh запущен не лаунчером', 'This dsh was not started by the launcher'),
@@ -2279,7 +2280,7 @@ async function restartDsh({ confirm = true } = {}) {
     return;
   }
   if (confirm) {
-    const { response } = await dialog.showMessageBox(win, {
+    const { response } = await dialog.showMessageBox(state.win, {
       type: 'question',
       buttons: [tr('Перезапустить', 'Restart'), tr('Отмена', 'Cancel')],
       defaultId: 0,
@@ -2292,16 +2293,16 @@ async function restartDsh({ confirm = true } = {}) {
   }
   console.log('[launcher] перезапуск dsh по запросу');
   restartingDsh = true;
-  launching = true; // watchdog не трогает окно, пока порт падает и поднимается
+  state.launching = true; // watchdog не трогает окно, пока порт падает и поднимается
   try {
     showPage(() => showStatus(tr('Перезапуск dsh…', 'Restarting dsh…'),
       tr('<p>Останавливаю <code>dsh</code> и запускаю заново…</p>', '<p>Stopping <code>dsh</code> and starting it again…</p>'), false));
-    if (adoptedDsh) await stopAdoptedDsh(); else await stopDsh();
+    if (state.adoptedDsh) await stopAdoptedDsh(); else await stopDsh();
     for (let i = 0; i < 50 && await portOpen(); i++) await sleep(100); // порт освободился
-    weStartedDsh = false; adoptedDsh = false; adoptedOldPgid = null; dshProc = null; dshFatal = false;
+    state.weStartedDsh = false; state.adoptedDsh = false; state.adoptedOldPgid = null; state.dshProc = null; state.dshFatal = false;
   } finally {
     restartingDsh = false;
-    launching = false;
+    state.launching = false;
   }
   await launchDshInner();
 }
@@ -2337,7 +2338,7 @@ function gpuStatusText(g) {
 function onDialogGpuEnable() {
   try { fs.unlinkSync(GPU_MARKER_FILE); console.log('[launcher] маркер сбоев GPU снят — GPU со следующего запуска'); }
   catch (e) { if (e.code !== 'ENOENT') console.error('[launcher] маркер GPU:', e.message); }
-  if (dialogRender) dialogRender(false);
+  if (state.dialogRender) state.dialogRender(false);
   return noContentResponse();
 }
 
@@ -2371,7 +2372,7 @@ function showLogDialog() {
   const render = (copied) => {
     const raw = logTail(LOG_FILE);
     const text = raw === null ? null : redactLog(raw);
-    dialogCopyText = text || '';
+    state.dialogCopyText = text || '';
     const body = `
       <p style="margin:0 0 8px"><code>${esc(LOG_FILE)}</code> — ${tr('последние строки; токены и ключи скрыты (***)', 'latest lines; tokens and keys are hidden (***)')}</p>
       ${text === null
@@ -2437,7 +2438,7 @@ async function maybeShowWhatsNew() {
   const title = tr('Что нового', 'What’s new');
   const gen = openDialog(title);
   if (gen === null) return;
-  dialogCopyText = '';
+  state.dialogCopyText = '';
   const link = `https://github.com/${UPDATE_GITHUB_REPO}/releases`;
   dialogShow(gen, () => dialogPage(title, `
     <p style="margin:0 0 4px">${tr('DeepSeek Harness Launcher обновлён:', 'DeepSeek Harness Launcher was updated:')} <code>${esc(last)}</code> → <code>${esc(current)}</code></p>
@@ -2467,7 +2468,7 @@ function setLanguage(lang) {
     try { fs.rmSync(langPrefFile(), { force: true }); } catch { /* noop */ }
     UI_LANG = /^ru/i.test(process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || '') ? 'ru' : 'en'; i18n.setLang(UI_LANG);
     buildAppMenu();
-    if (currentPage) currentPage();
+    if (state.currentPage) state.currentPage();
   } else {
     onLangSwitch(lang);
   }
@@ -2501,7 +2502,7 @@ function onSettingsSet(url) {
       else if (key === 'pollUpdates') { saveSettings({ pollUpdates: r.value ? null : false }); setUpdatePolling(r.value); }
       else if (key === 'closeToTray') { saveSettings({ closeToTray: r.value ? true : null }); setTray(r.value); }
       else if (key === 'attention') saveSettings({ attention: r.value ? null : false });
-      else if (key === 'attentionSound') { saveSettings({ attentionSound: r.value ? true : null }); if (r.value && win) playAgentSound(); } // сразу — услышать
+      else if (key === 'attentionSound') { saveSettings({ attentionSound: r.value ? true : null }); if (r.value && state.win) playAgentSound(); } // сразу — услышать
       else saveSettings({ [key]: r.value || null }); // dshPath, cwd: '' — по умолчанию
       console.log(`[launcher] настройки: ${key} = ${key === 'dshPath' || key === 'cwd' ? (r.value || '(по умолчанию)') : r.value}`);
       settingsNote = { text: tr('Сохранено', 'Saved'), error: false };
@@ -2509,16 +2510,16 @@ function onSettingsSet(url) {
       settingsNote = { text: e.message, error: true };
     }
   }
-  if (dialogRender) dialogRender(false);
+  if (state.dialogRender) state.dialogRender(false);
   return noContentResponse();
 }
 
 async function onSettingsPick(kind) {
-  if (!dialogWin || dialogWin.isDestroyed()) return noContentResponse();
+  if (!state.dialogWin || state.dialogWin.isDestroyed()) return noContentResponse();
   const isDir = kind === 'cwd';
-  const r = await dialog.showOpenDialog(dialogWin, {
+  const r = await dialog.showOpenDialog(state.dialogWin, {
     title: isDir ? tr('Рабочая папка dsh', 'dsh working folder') : tr('Программа dsh', 'The dsh program'),
-    defaultPath: isDir ? CWD : path.dirname(DSH_BIN),
+    defaultPath: isDir ? CWD : path.dirname(state.dshBin),
     properties: isDir ? ['openDirectory'] : ['openFile'],
   });
   if (!r.canceled && r.filePaths[0]) {
@@ -2531,7 +2532,7 @@ function onSettingsResetUpdates() {
   try { fs.writeFileSync(updatePrefFile(), '{}'); } catch { /* noop */ }
   console.log('[launcher] настройки: снова спрашивать об обновлениях');
   settingsNote = { text: tr('Об отложенных обновлениях лаунчер снова спросит при запуске.', 'The launcher will ask about postponed updates again at startup.'), error: false };
-  if (dialogRender) dialogRender(false);
+  if (state.dialogRender) state.dialogRender(false);
   return noContentResponse();
 }
 
@@ -2542,12 +2543,12 @@ function onSettingsResetUpdates() {
 // и запускает новый экземпляр через sh, который ждёт, пока старый выйдет
 // совсем (не дольше 20 с): иначе экземпляры перекрываются — новый не может
 // занять то, что ещё держит старый (порт отладки, файлы Chromium).
-let relaunchRequested = false;
+state.relaunchRequested = false;
 
 function relaunchLauncher(why = 'чтобы применить настройки') {
-  if (relaunchRequested || stopping) return;
+  if (state.relaunchRequested || state.stopping) return;
   console.log(`[launcher] перезапуск лаунчера, ${why}`);
-  relaunchRequested = true;
+  state.relaunchRequested = true;
   app.quit();
 }
 
@@ -2578,7 +2579,7 @@ function showSettingsDialog() {
   const gen = openDialog(title);
   if (gen === null) return;
   settingsNote = null;
-  dialogCopyText = '';
+  state.dialogCopyText = '';
   const render = () => {
     const next = effectiveConfig(process.env, loadSettings(), os.homedir());
     const pending = restartNeeded(CONFIG, next);
@@ -2592,7 +2593,7 @@ function showSettingsDialog() {
         onchange="set('${key}', this.checked)"> ${esc(label)}</label>`;
     const dismissed = updateDismissals();
     const gpu = gpuStatusNow();
-    const dshShown = next.dshBin || tr(`автоматически (сейчас: ${DSH_BIN})`, `automatic (now: ${DSH_BIN})`);
+    const dshShown = next.dshBin || tr(`автоматически (сейчас: ${state.dshBin})`, `automatic (now: ${state.dshBin})`);
     const body = `
       ${pending.length ? `<div class="banner">${tr('Изменения вступят в силу после перезапуска лаунчера.', 'Changes take effect after the launcher restarts.')}
         <button onclick="go('relaunch')">${tr('Перезапустить лаунчер', 'Restart the launcher')}</button></div>` : ''}
@@ -2676,10 +2677,10 @@ function showSettingsDialog() {
 // пункта: повторный вызов меняет содержимое. Закрыть — кнопкой, Esc или
 // крестиком окна. Кнопки — переходы на dshlauncher://dialog/… (ответ 204:
 // страница остаётся, обработчик делает своё).
-let dialogWin = null;
-let dialogRender = null; // перерисовка текущего содержимого: (copied) => void
+state.dialogWin = null;
+state.dialogRender = null; // перерисовка текущего содержимого: (copied) => void
 let dialogGen = 0;       // поколение: поздний async-результат не попадёт в закрытый или сменившийся диалог
-let dialogCopyText = '';
+state.dialogCopyText = '';
 let dimKey = null;       // ключ insertCSS затемнения главного окна
 
 // Затемнение содержимого главного окна, пока открыт диалог: слой поверх
@@ -2692,8 +2693,8 @@ const DIM_CSS = `
     animation: dshl-dim .15s ease-out; }`;
 
 async function dimMain(on) {
-  if (!win || win.isDestroyed() || win.webContents.isDestroyed() || stopping) return;
-  const wc = win.webContents;
+  if (!state.win || state.win.isDestroyed() || state.win.webContents.isDestroyed() || state.stopping) return;
+  const wc = state.win.webContents;
   try {
     if (on && !dimKey) dimKey = await wc.insertCSS(DIM_CSS);
     else if (!on && dimKey) { const k = dimKey; dimKey = null; await wc.removeInsertedCSS(k); }
@@ -2703,11 +2704,11 @@ async function dimMain(on) {
 // Открыть диалог (или переиспользовать открытый) — поколение нового содержимого,
 // null — окна нет / идёт выход.
 function openDialog(title) {
-  if (!win || win.isDestroyed() || stopping) return null;
+  if (!state.win || state.win.isDestroyed() || state.stopping) return null;
   dialogGen++;
-  if (dialogWin && !dialogWin.isDestroyed()) { dialogWin.focus(); return dialogGen; }
+  if (state.dialogWin && !state.dialogWin.isDestroyed()) { state.dialogWin.focus(); return dialogGen; }
   const d = new BrowserWindow({
-    parent: win,
+    parent: state.win,
     modal: true,
     width: 760,
     height: 580,
@@ -2722,7 +2723,7 @@ function openDialog(title) {
     show: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false, spellcheck: false },
   });
-  dialogWin = d;
+  state.dialogWin = d;
   d.setMenu(null);
   d.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) shell.openExternal(url);
@@ -2737,7 +2738,7 @@ function openDialog(title) {
   // Wayland: ready-to-show может опоздать (как у главного окна) — показываем сами.
   setTimeout(() => { if (!d.isDestroyed() && !d.isVisible()) d.show(); }, 3000);
   d.on('closed', () => {
-    if (dialogWin === d) { dialogWin = null; dialogRender = null; dialogGen++; }
+    if (state.dialogWin === d) { state.dialogWin = null; state.dialogRender = null; dialogGen++; }
     void dimMain(false);
   });
   return dialogGen;
@@ -2745,14 +2746,14 @@ function openDialog(title) {
 
 // Показать содержимое, если диалог того же поколения ещё открыт.
 function dialogShow(gen, render) {
-  if (gen !== dialogGen || !dialogWin || dialogWin.isDestroyed()) return;
-  dialogRender = render;
+  if (gen !== dialogGen || !state.dialogWin || state.dialogWin.isDestroyed()) return;
+  state.dialogRender = render;
   render(false);
 }
 
 function dialogPage(title, body) {
-  if (!dialogWin || dialogWin.isDestroyed()) return;
-  dialogWin.loadURL(pageHtml(title, body, false, { dialog: true }))
+  if (!state.dialogWin || state.dialogWin.isDestroyed()) return;
+  state.dialogWin.loadURL(pageHtml(title, body, false, { dialog: true }))
     .catch((e) => { if (e.code !== 'ERR_ABORTED') console.error('[launcher] диалог:', e.message); });
 }
 
@@ -2760,13 +2761,13 @@ const dialogCloseButton = () =>
   `<button onclick="location.href='dshlauncher://dialog/close/'">${tr('Закрыть', 'Close')}</button>`;
 
 function onDialogClose() {
-  if (dialogWin && !dialogWin.isDestroyed()) dialogWin.close();
+  if (state.dialogWin && !state.dialogWin.isDestroyed()) state.dialogWin.close();
   return noContentResponse();
 }
 
 function onDialogCopy() {
-  if (dialogCopyText) clipboard.writeText(dialogCopyText);
-  if (dialogRender) dialogRender(true); // перерисовка: «Скопировано»
+  if (state.dialogCopyText) clipboard.writeText(state.dialogCopyText);
+  if (state.dialogRender) state.dialogRender(true); // перерисовка: «Скопировано»
   return noContentResponse();
 }
 
@@ -2784,13 +2785,13 @@ async function showAboutDialog() {
     const rows = [
       ['DeepSeek Harness Launcher', lDisp + lLabel],
       [tr('бэкенд dsh', 'dsh backend'), dDisp],
-      [tr('путь к dsh', 'path to dsh'), DSH_BIN || '—'],
+      [tr('путь к dsh', 'path to dsh'), state.dshBin || '—'],
       ['Node.js', 'v' + process.versions.node],
       [tr('ОС', 'OS'), os.platform() + ' ' + os.release() + ' (' + os.arch() + ')'],
       [tr('GPU-ускорение', 'GPU acceleration'), gpuStatusText(gpu)],
       [tr('логи', 'logs'), LOG_DIR],
     ];
-    dialogCopyText = ver.loaded ? rows.map(([k, v]) => k + ': ' + v).join('\n') : '';
+    state.dialogCopyText = ver.loaded ? rows.map(([k, v]) => k + ': ' + v).join('\n') : '';
     const body = `
       <table style="border-collapse:collapse; margin-bottom:4px">
         ${rows.map(([k, v]) =>
@@ -2821,7 +2822,7 @@ async function showUpdateCheckDialog() {
   const title = tr('Проверка обновлений', 'Update check');
   const gen = openDialog(title);
   if (gen === null) return;
-  dialogCopyText = '';
+  state.dialogCopyText = '';
   dialogShow(gen, () => dialogPage(title,
     '<p>' + tr('Проверяю…', 'Checking…') + '</p>' +
     '<div class="actions">' + dialogCloseButton() + '</div>'));
@@ -2901,12 +2902,12 @@ async function findUpdates(checks) {
   if (l && l.version && lInst && compareDebianVer(tagToPackageVersion(l.version), lInst) > 0) {
     found.launcher = { version: l.version, installed: lInst, releases: l.releases };
   }
-  if (!dshInstalledVersion) {
-    const r = await probeDsh(DSH_BIN);
-    if (r.ok) dshInstalledVersion = r.version;
+  if (!state.dshInstalledVersion) {
+    const r = await probeDsh(state.dshBin);
+    if (r.ok) state.dshInstalledVersion = r.version;
   }
-  if (d && d.version && dshInstalledVersion && compareSemVer(d.version, dshInstalledVersion) > 0) {
-    found.dsh = { version: d.version, installed: dshInstalledVersion };
+  if (d && d.version && state.dshInstalledVersion && compareSemVer(d.version, state.dshInstalledVersion) > 0) {
+    found.dsh = { version: d.version, installed: state.dshInstalledVersion };
   }
   return found;
 }
@@ -2951,10 +2952,10 @@ function setUpdatePolling(on) {
 }
 
 async function pollUpdates() {
-  if (stopping || launching || restarting || relaunchRequested || updateState.running) return;
+  if (state.stopping || state.launching || state.restarting || state.relaunchRequested || updateState.running) return;
   try {
     const found = await findUpdates();
-    if (!stopping) setAvailableUpdates(found, true);
+    if (!state.stopping) setAvailableUpdates(found, true);
   } catch (e) {
     console.error('[launcher] периодическая проверка обновлений:', e.message);
   }
@@ -3002,8 +3003,8 @@ function updateToastUrl(kinds) {
 }
 
 function placeToast() {
-  if (!toastView || !win || win.isDestroyed()) return;
-  const [cw] = win.getContentSize();
+  if (!toastView || !state.win || state.win.isDestroyed()) return;
+  const [cw] = state.win.getContentSize();
   const y = 10 + (findView && findView.getVisible() ? FIND_H + 8 : 0);
   toastView.setBounds({ x: Math.max(0, cw - TOAST_W - 18), y, width: Math.min(TOAST_W, cw), height: TOAST_H });
 }
@@ -3014,13 +3015,13 @@ function showUpdateToast(kinds) {
 }
 
 function showToast(url) {
-  if (!win || win.isDestroyed() || stopping) return;
+  if (!state.win || state.win.isDestroyed() || state.stopping) return;
   closeUpdateToast();
   toastView = new WebContentsView({ webPreferences: { contextIsolation: true, nodeIntegration: false, spellcheck: false } });
   toastView.setBackgroundColor('#00000000');
   toastView.webContents.loadURL(url).catch(() => {});
-  win.contentView.addChildView(toastView);
-  if (!toastResizeHooked) { win.on('resize', placeToast); toastResizeHooked = true; }
+  state.win.contentView.addChildView(toastView);
+  if (!toastResizeHooked) { state.win.on('resize', placeToast); toastResizeHooked = true; }
   placeToast();
 }
 
@@ -3028,7 +3029,7 @@ function closeUpdateToast() {
   if (!toastView) return;
   const v = toastView;
   toastView = null;
-  if (win && !win.isDestroyed()) win.contentView.removeChildView(v);
+  if (state.win && !state.win.isDestroyed()) state.win.contentView.removeChildView(v);
   try { v.webContents.close(); } catch { /* уже закрыта */ }
 }
 
@@ -3057,7 +3058,7 @@ function showUpdateNowDialog(kind) {
   const title = tr(`Обновление ${name}`, `${name} update`);
   const gen = openDialog(title);
   if (gen === null) return;
-  dialogCopyText = '';
+  state.dialogCopyText = '';
   dialogShow(gen, () => dialogPage(title, `
     <p>${tr(`Доступна версия <code>${esc(u.version)}</code> (установлена <code>${esc(u.installed)}</code>).`,
             `Version <code>${esc(u.version)}</code> is available (installed: <code>${esc(u.installed)}</code>).`)}</p>
@@ -3161,7 +3162,7 @@ async function reportFacts() {
     [tr('режим окна', 'window mode'), app.commandLine.getSwitchValue('ozone-platform') || 'x11'],
     [tr('GPU-ускорение', 'GPU acceleration'), gpuStatusText(gpuStatusNow())],
     [tr('язык окна', 'window language'), UI_LANG],
-    [tr('путь к dsh', 'path to dsh'), DSH_BIN],
+    [tr('путь к dsh', 'path to dsh'), state.dshBin],
     [tr('аргументы dsh', 'dsh arguments'), DSH_ARGS.join(' ')],
     [tr('рабочая папка', 'working folder'), CWD],
     [tr('порт', 'port'), PORT],
@@ -3174,7 +3175,7 @@ async function reportFacts() {
 async function saveReport() {
   let dest = process.env.DSH_LAUNCHER_REPORT_PATH || null;
   if (!dest) {
-    const parent = dialogWin && !dialogWin.isDestroyed() ? dialogWin : win;
+    const parent = state.dialogWin && !state.dialogWin.isDestroyed() ? state.dialogWin : state.win;
     let dir = os.homedir();
     try { dir = app.getPath('downloads'); } catch { /* noop */ }
     const r = await dialog.showSaveDialog(parent, {
@@ -3215,7 +3216,7 @@ function showReportDialog(error) {
   const title = tr('Отчёт', 'Report');
   const gen = openDialog(title);
   if (gen === null) return;
-  dialogCopyText = '';
+  state.dialogCopyText = '';
   dialogShow(gen, () => dialogPage(title, error
     ? `<p class="note err">${esc(tr('Не удалось сохранить отчёт: ', 'Could not save the report: ') + error)}</p>
        <div class="actions">${dialogCloseButton()}</div>`
@@ -3286,7 +3287,7 @@ function setTray(on) {
     tray.destroy();
     tray = null;
     console.log('[launcher] трей выключен');
-    if (win && !win.isDestroyed() && !win.isVisible()) showMainWindow(); // не оставить окно спрятанным без значка
+    if (state.win && !state.win.isDestroyed() && !state.win.isVisible()) showMainWindow(); // не оставить окно спрятанным без значка
   }
 }
 
@@ -3297,21 +3298,21 @@ function setTrayAttention(on) {
 }
 
 function showMainWindow() {
-  if (!win || win.isDestroyed()) return;
-  const wasHidden = !win.isVisible();
-  win.show();
-  if (win.isMinimized()) win.restore();
-  win.focus();
-  win.flashFrame(false);
+  if (!state.win || state.win.isDestroyed()) return;
+  const wasHidden = !state.win.isVisible();
+  state.win.show();
+  if (state.win.isMinimized()) state.win.restore();
+  state.win.focus();
+  state.win.flashFrame(false);
   setTrayAttention(false);
   if (wasHidden) console.log('[launcher] окно показано из трея');
 }
 
 // Крестик при включённом трее — спрятать окно (не при выходе и перезапуске).
 function onMainWindowClose(e) {
-  if (!tray || !closeToTrayOn() || stopping || relaunchRequested || restarting) return;
+  if (!tray || !closeToTrayOn() || state.stopping || state.relaunchRequested || state.restarting) return;
   e.preventDefault();
-  win.hide();
+  state.win.hide();
   console.log('[launcher] окно спрятано в трей — dsh работает дальше');
 }
 
@@ -3328,7 +3329,7 @@ let agentNotification = null; // ссылка — чтобы уведомлен�
 
 function agentSessionTitle() {
   try {
-    const m = /^(.*) — [^—]+$/.exec(win.webContents.getTitle()); // «<сессия> — DeepSeek Harness»
+    const m = /^(.*) — [^—]+$/.exec(state.win.webContents.getTitle()); // «<сессия> — DeepSeek Harness»
     return m ? m[1] : '';
   } catch { return ''; }
 }
@@ -3360,24 +3361,24 @@ function playAgentSound() {
     }
     setTimeout(() => c.close(), 900);
   } catch (e) {} })()`;
-  win.webContents.executeJavaScript(js, true).catch(() => {});
+  state.win.webContents.executeJavaScript(js, true).catch(() => {});
 }
 
 async function pollAgentState() {
-  if (!win || win.isDestroyed() || stopping) return;
-  try { if (new URL(win.webContents.getURL()).origin !== new URL(PLAIN_URL).origin) { agentRunning = false; return; } } catch { return; }
+  if (!state.win || state.win.isDestroyed() || state.stopping) return;
+  try { if (new URL(state.win.webContents.getURL()).origin !== new URL(PLAIN_URL).origin) { agentRunning = false; return; } } catch { return; }
   let running;
-  try { running = await win.webContents.executeJavaScript("!!document.querySelector('[data-chat-running]')", true); } catch { return; }
+  try { running = await state.win.webContents.executeJavaScript("!!document.querySelector('[data-chat-running]')", true); } catch { return; }
   if (running === agentRunning) return;
   agentRunning = running;
   if (running) { console.log('[launcher] агент отвечает'); return; }
-  const hidden = !win.isVisible();
-  const away = hidden || !win.isFocused();
+  const hidden = !state.win.isVisible();
+  const away = hidden || !state.win.isFocused();
   console.log(`[launcher] агент закончил ответ${hidden ? ' — окно в трее' : away ? ' — окно не в фокусе' : ''}`);
   if (!away || !attentionOn()) return;
   notifyAgentFinished();
   if (tray) { setTrayAttention(true); console.log('[launcher] значок трея: агент закончил ответ'); }
-  if (!hidden) win.flashFrame(true);
+  if (!hidden) state.win.flashFrame(true);
   if (attentionSoundOn()) playAgentSound();
 }
 
@@ -3386,36 +3387,36 @@ async function pollAgentState() {
 // Защита от повторного запуска: двойной клик «Проверить ещё раз» или
 // «Установить» вызвал бы launchDsh дважды — второй spawn перезаписал бы
 // dshProc, и первый процесс остался бы без присмотра (не убит при закрытии).
-let launching = false;
+state.launching = false;
 
 function ourDshAlive() {
-  return weStartedDsh && dshProc && dshProc.exitCode === null && !dshFatal;
+  return state.weStartedDsh && state.dshProc && state.dshProc.exitCode === null && !state.dshFatal;
 }
 
 async function launchDsh() {
-  if (launching || ourDshAlive()) {
+  if (state.launching || ourDshAlive()) {
     console.log('[launcher] запуск dsh уже идёт — повторный вызов пропущен');
     return;
   }
-  launching = true;
+  state.launching = true;
   try {
     if (await offerLauncherUpdate()) return; // перезапуск в новую версию — dsh поднимет она
-    if (stopping) return;
+    if (state.stopping) return;
     await offerDshUpdate();
-    if (stopping) return;
+    if (state.stopping) return;
     await offerMarketIfMissing();
-    if (stopping) return;
+    if (state.stopping) return;
     void refreshAvailableUpdates(); // отложенное обновление — пунктом в «Справке»
     await launchDshInner();
   } finally {
-    launching = false;
+    state.launching = false;
   }
 }
 
 async function launchDshInner() {
   showPage(() => showStatus(tr('Запуск DeepSeek Harness…', 'Starting DeepSeek Harness…'), tr(
-    `<p>Запускаю <code>${esc(DSH_BIN)} ${esc(DSH_ARGS.join(' '))}</code>.<br>Жду, пока сервис поднимется…</p>`,
-    `<p>Running <code>${esc(DSH_BIN)} ${esc(DSH_ARGS.join(' '))}</code>.<br>Waiting for the service to come up…</p>`)));
+    `<p>Запускаю <code>${esc(state.dshBin)} ${esc(DSH_ARGS.join(' '))}</code>.<br>Жду, пока сервис поднимется…</p>`,
+    `<p>Running <code>${esc(state.dshBin)} ${esc(DSH_ARGS.join(' '))}</code>.<br>Waiting for the service to come up…</p>`)));
   startDsh();
 
   const up = await waitForPort();
@@ -3423,11 +3424,11 @@ async function launchDshInner() {
     showPage(() => showStatus(tr('Не удалось запустить dsh', 'Failed to start dsh'), tr(
       `<p>Процесс не поднял сервис на <code>${PLAIN_URL}</code>.<br>
          Проверьте, что команда запускается в терминале:
-         <code>${esc(DSH_BIN)} ${esc(DSH_ARGS.join(' '))}</code>.<br>
+         <code>${esc(state.dshBin)} ${esc(DSH_ARGS.join(' '))}</code>.<br>
          Последние строки журнала:</p>`,
       `<p>The process did not bring up the service at <code>${PLAIN_URL}</code>.<br>
          Check that the command runs in a terminal:
-         <code>${esc(DSH_BIN)} ${esc(DSH_ARGS.join(' '))}</code>.<br>
+         <code>${esc(state.dshBin)} ${esc(DSH_ARGS.join(' '))}</code>.<br>
          Latest log lines:</p>`) + stderrBlock(), true));
     startWatchdog(); // если dsh запустят вручную — окно оживёт само
     return;
@@ -3435,8 +3436,8 @@ async function launchDshInner() {
 
   // Порт уже поднят нами: проверка watchdog, начатая во время запуска и
   // завершившаяся после, не должна принять это за перезапуск dsh.
-  portState = 'up';
-  const url = authUrl || (await waitForAuthUrl());
+  state.portState = 'up';
+  const url = state.authUrl || (await waitForAuthUrl());
   if (url) {
     await loadInWin(url); // обмен токена на куки, затем редирект на чистый URL
   } else if (await plainUrlIsAuthed()) {
@@ -3471,17 +3472,17 @@ async function plainUrlIsAuthed() {
  * перезагрузить страницу — приложение восстановится само.
  */
 let watchdogStarted = false;
-let portState = null; // null | 'up' | 'down'
+state.portState = null; // null | 'up' | 'down'
 let lastAutoReloadAt = 0;
 
 async function recoverWindow(force = false) {
-  if (!win || win.isDestroyed() || stopping) return;
+  if (!state.win || state.win.isDestroyed() || state.stopping) return;
   const now = Date.now();
   if (!force && now - lastAutoReloadAt < 3000) return; // защита от флаттера порта
   lastAutoReloadAt = now;
   try {
     let cur = 'about:blank';
-    try { cur = win.webContents.getURL(); } catch { return; }
+    try { cur = state.win.webContents.getURL(); } catch { return; }
     const dshOrigin = new URL(PLAIN_URL).origin;
     let onDshPage = false;
     try { onDshPage = new URL(cur).origin === dshOrigin; } catch { /* data: и т.п. */ }
@@ -3501,22 +3502,22 @@ function startWatchdog() {
   if (watchdogStarted) return;
   watchdogStarted = true;
   (async () => {
-    portState = (await portOpen()) ? 'up' : 'down'; // базовое состояние, без срабатываний
+    state.portState = (await portOpen()) ? 'up' : 'down'; // базовое состояние, без срабатываний
     setInterval(async () => {
-      if (stopping) return;
+      if (state.stopping) return;
       const state = (await portOpen()) ? 'up' : 'down';
-      if (state === portState) return;
-      if (state === 'up' && launching) {
-        portState = state; // окно доведёт до GUI сам launchDsh — не мешаем ему второй навигацией
+      if (state === state.portState) return;
+      if (state === 'up' && state.launching) {
+        state.portState = state; // окно доведёт до GUI сам launchDsh — не мешаем ему второй навигацией
         return;
       }
       if (state === 'up') {
         console.log(`[launcher] dsh снова отвечает на порту ${PORT} — обновляю окно`);
-        portState = state;
+        state.portState = state;
         recoverWindow();
       } else {
         console.log(`[launcher] порт ${PORT} закрыт — если dsh перезапустят, окно восстановится само`);
-        portState = state;
+        state.portState = state;
       }
     }, 1500);
   })();
@@ -3530,9 +3531,9 @@ function startWatchdog() {
 function onPasteRequest(request) {
   try {
     const pasted = decodeURIComponent(launcherRoute(request.url).replace(/^\/paste\//, ''));
-    if (/^https?:\/\//i.test(pasted) && win && !win.isDestroyed()) {
+    if (/^https?:\/\//i.test(pasted) && state.win && !state.win.isDestroyed()) {
       console.log('[launcher] loading pasted URL');
-      win.loadURL(pasted).catch((e) => console.error('[launcher] loadURL:', e.message));
+      state.win.loadURL(pasted).catch((e) => console.error('[launcher] loadURL:', e.message));
     }
   } catch (e) {
     console.error('[launcher] paste handler:', e.message);
@@ -3545,13 +3546,13 @@ function onPasteRequest(request) {
 // (например, в терминале), а окно оставили открытым — возвращаемся в GUI.
 async function onRetryRequest() {
   try {
-    if (win && !win.isDestroyed() && !stopping) {
+    if (state.win && !state.win.isDestroyed() && !state.stopping) {
       const up = await portOpen();
       if (up) {
-        weStartedDsh = false; // чужой dsh — при закрытии окна его не убиваем
-        dshProc = null;
-        dshFatal = false;
-        portState = 'up';
+        state.weStartedDsh = false; // чужой dsh — при закрытии окна его не убиваем
+        state.dshProc = null;
+        state.dshFatal = false;
+        state.portState = 'up';
         if (await plainUrlIsAuthed()) {
           console.log('[launcher] retry: dsh запущен, куки валидны — открываю GUI');
           await loadInWin(PLAIN_URL);
@@ -3568,11 +3569,11 @@ async function onRetryRequest() {
         } else {
           showPage(() => showStatus(tr('dsh не запущен', 'dsh is not running'), tr(
             `<p>Порт ${PORT} закрыт — <code>dsh</code> не запущен.</p>
-               <p>Запустите его в терминале: <code>${esc(DSH_BIN)} ${esc(DSH_ARGS.join(' '))}</code>
+               <p>Запустите его в терминале: <code>${esc(state.dshBin)} ${esc(DSH_ARGS.join(' '))}</code>
                и нажмите «Проверить снова». Либо закройте окно и запустите
                dsh-launcher снова.</p>`,
             `<p>Port ${PORT} is closed — <code>dsh</code> is not running.</p>
-               <p>Start it in a terminal: <code>${esc(DSH_BIN)} ${esc(DSH_ARGS.join(' '))}</code>
+               <p>Start it in a terminal: <code>${esc(state.dshBin)} ${esc(DSH_ARGS.join(' '))}</code>
                and click “Check again”. Or close this window and start
                dsh-launcher again.</p>`) + retryButton(), false));
         }
@@ -3635,7 +3636,7 @@ async function onInstallRecheck() {
 // «Установить»: npm install -g прямо из окна, с живым логом.
 async function onInstallRun() {
   try {
-    if (installState.running || !win || win.isDestroyed() || stopping) return blankResponse();
+    if (installState.running || !state.win || state.win.isDestroyed() || state.stopping) return blankResponse();
     await refreshInstallState();
     if (installState.running) return blankResponse(); // пока проверяли, установку уже запустили
     const npmInfo = installState.npmInfo;
@@ -3738,10 +3739,10 @@ async function onReady() {
       if (route.startsWith('/update-now/')) { updateNow(new URL(request.url).searchParams.get('k')); return noContentResponse(); }
       if (route.startsWith('/find/')) return onFindRequest(route, request.url);
       if (route.startsWith('/dialog/logs/')) { void openLogsFolder(); return noContentResponse(); }
-      if (route.startsWith('/window/close/')) { if (win && !win.isDestroyed()) win.close(); return noContentResponse(); }
+      if (route.startsWith('/window/close/')) { if (state.win && !state.win.isDestroyed()) state.win.close(); return noContentResponse(); }
       if (route.startsWith('/menu/report/')) { void saveReport(); return noContentResponse(); }
       if (route.startsWith('/dialog/report-show/')) { if (lastReportPath) shell.showItemInFolder(lastReportPath); return noContentResponse(); }
-      if (route.startsWith('/dialog/log-refresh/')) { if (dialogRender) dialogRender(false); return noContentResponse(); }
+      if (route.startsWith('/dialog/log-refresh/')) { if (state.dialogRender) state.dialogRender(false); return noContentResponse(); }
       if (route.startsWith('/menu/log/')) { showLogDialog(); return noContentResponse(); }
       if (route.startsWith('/menu/settings/')) { showSettingsDialog(); return noContentResponse(); }
       if (route.startsWith('/settings/set/')) return onSettingsSet(request.url);
@@ -3764,7 +3765,7 @@ async function onReady() {
   });
 
   const size = windowSize(loadWindowState(), screen.getPrimaryDisplay().workAreaSize);
-  win = new BrowserWindow({
+  state.win = new BrowserWindow({
     width: size.width,
     height: size.height,
     minWidth: WIN_MIN.width,
@@ -3778,44 +3779,44 @@ async function onReady() {
     // autoplayPolicy — звук «агент закончил» (WebAudio) без нажатия в окне
     webPreferences: { contextIsolation: true, nodeIntegration: false, spellcheck: true, autoplayPolicy: 'no-user-gesture-required' },
   });
-  if (size.maximized) win.maximize();
-  trackWindowState(win);
-  win.on('close', onMainWindowClose);
-  win.on('focus', () => { win.flashFrame(false); setTrayAttention(false); });
+  if (size.maximized) state.win.maximize();
+  trackWindowState(state.win);
+  state.win.on('close', onMainWindowClose);
+  state.win.on('focus', () => { state.win.flashFrame(false); setTrayAttention(false); });
   initSpellcheck();
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  state.win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
   // Правый клик — контекстное меню (копировать / вставить …): своего у
   // Electron нет. И в GUI dsh, и на служебных страницах лаунчера.
-  win.webContents.on('context-menu', (_e, params) => showContextMenu(params));
+  state.win.webContents.on('context-menu', (_e, params) => showContextMenu(params));
   // диагностика: из лога должно быть видно, что окно показало и что загрузилось
-  win.once('ready-to-show', () => { win.show(); console.log('[launcher] окно показано'); });
+  state.win.once('ready-to-show', () => { state.win.show(); console.log('[launcher] окно показано'); });
   // Страховка: на нативном Wayland ready-to-show может прийти с большим
   // опозданием (или не прийти вовсе) — окно с show:false остаётся невидимым.
   // Если через 8 с оно всё ещё не показано — показываем вручную.
   setTimeout(() => {
     // isDestroyed: окно могли закрыть (и app.quit()) раньше таймера —
     // методы на уничтоженном окне бросают исключение.
-    if (win && !win.isDestroyed() && !win.isVisible()) {
+    if (state.win && !state.win.isDestroyed() && !state.win.isVisible()) {
       console.log('[launcher] ready-to-show не пришло за 8 с — показываю окно вручную');
-      win.show();
+      state.win.show();
     }
   }, 8000);
-  win.webContents.on('did-finish-load', () => {
+  state.win.webContents.on('did-finish-load', () => {
     // первая загрузка GUI dsh — показать «Что нового», если лаунчер обновился
     try {
-      if (new URL(win.webContents.getURL()).origin === new URL(PLAIN_URL).origin) { void maybeShowWhatsNew(); maybeShowCrashNotice(); }
+      if (new URL(state.win.webContents.getURL()).origin === new URL(PLAIN_URL).origin) { void maybeShowWhatsNew(); maybeShowCrashNotice(); }
     } catch { /* data: */ }
     // перезагрузка под открытым диалогом (watchdog) сбрасывает затемнение
-    if (dialogWin && !dialogWin.isDestroyed()) { dimKey = null; void dimMain(true); }
-    try { console.log('[launcher] страница загружена:', win.webContents.getURL().slice(0, 120)); } catch { /* noop */ }
+    if (state.dialogWin && !state.dialogWin.isDestroyed()) { dimKey = null; void dimMain(true); }
+    try { console.log('[launcher] страница загружена:', state.win.webContents.getURL().slice(0, 120)); } catch { /* noop */ }
   });
-  win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
+  state.win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {
     if (isMainFrame) console.error(`[launcher] ошибка загрузки: code=${code} ${desc} url=${String(url).slice(0, 120)}`);
   });
-  win.webContents.on('render-process-gone', (_e, details) => {
+  state.win.webContents.on('render-process-gone', (_e, details) => {
     console.error('[launcher] рендер-процесс завершился:', details.reason, 'exitCode=' + details.exitCode);
     if (launcherUpdatedOnDisk) restartLauncher(); // новые файлы на диске — старому не подняться
   });
@@ -3826,11 +3827,11 @@ async function onReady() {
   try {
     const savedZoom = JSON.parse(fs.readFileSync(zoomFile(), 'utf8'));
     if (Number.isFinite(savedZoom.zoomLevel)) {
-      win.webContents.setZoomLevel(Math.max(-5, Math.min(5, savedZoom.zoomLevel)));
+      state.win.webContents.setZoomLevel(Math.max(-5, Math.min(5, savedZoom.zoomLevel)));
       console.log(`[launcher] восстановлен масштаб: ${savedZoom.zoomLevel}`);
     }
   } catch { /* noop */ }
-  win.webContents.on('before-input-event', (event, input) => {
+  state.win.webContents.on('before-input-event', (event, input) => {
     try {
       if (input.type !== 'keyDown') return;
       const act = keyAction(input);
@@ -3860,7 +3861,7 @@ async function onReady() {
   // Порт закрыт — будем запускать dsh сами. Сначала проверяем, что он вообще
   // установлен: иначе вместо понятной страницы — ENOENT после попытки старта.
   const installCheck = await dshInstallCheck();
-  dshInstalledVersion = installCheck.version || null;
+  state.dshInstalledVersion = installCheck.version || null;
   if (!installCheck.ok) {
     console.log(
       `[launcher] dsh не найден (${installCheck.reason}` +
@@ -3879,8 +3880,8 @@ async function onReady() {
 app.on('window-all-closed', () => app.quit());
 
 app.on('before-quit', (e) => {
-  if (stopping) return;
-  stopping = true;
+  if (state.stopping) return;
+  state.stopping = true;
   e.preventDefault();
   if (installState.running && installState.proc) {
     try { installState.proc.kill('SIGTERM'); } catch { /* noop */ }
@@ -3898,9 +3899,9 @@ app.on('before-quit', (e) => {
   }
   Promise.resolve().then(async () => {
     await stopDsh();
-    if (adoptedDsh) await stopAdoptedDsh();
+    if (state.adoptedDsh) await stopAdoptedDsh();
   }).finally(() => {
-    if (relaunchRequested) { try { spawnNewInstance(); } catch (e) { console.error('[launcher] перезапуск:', e.message); } }
+    if (state.relaunchRequested) { try { spawnNewInstance(); } catch (e) { console.error('[launcher] перезапуск:', e.message); } }
     app.quit();
   });
 });
@@ -3913,10 +3914,10 @@ app.on('will-quit', () => { killDshNow(); clearRunMarker(); });
 // лаунчеру, нельзя — в том случае dsh переживёт его (это ограничение
 // отделимого процесса, лечится только системно — cgroup/supervisor).
 function killDshNow() {
-  if (weStartedDsh && dshProc && dshProc.pid !== undefined && !dshFatal) {
-    killGroup(dshProc.pid, 'SIGKILL', dshLeaderExited());
+  if (state.weStartedDsh && state.dshProc && state.dshProc.pid !== undefined && !state.dshFatal) {
+    killGroup(state.dshProc.pid, 'SIGKILL', dshLeaderExited());
   }
-  if (adoptedDsh) {
+  if (state.adoptedDsh) {
     for (const t of adoptedTargets()) killGroup(t.id, 'SIGKILL', t.groupOnly);
   }
 }

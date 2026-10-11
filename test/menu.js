@@ -67,7 +67,7 @@ function fakeEnv({ destroyed = false } = {}) {
   };
   const clipboard = { writeText: (t) => calls.push('clipboard:' + t) };
   env.logs = [];
-  env.show = extract('showContextMenu', { win, Menu, clipboard, contextMenuItems: ctx, console: { log: (m) => env.logs.push(m) }, openContextMenu: null });
+  env.show = extract('showContextMenu', { state: { win }, Menu, clipboard, contextMenuItems: ctx, console: { log: (m) => env.logs.push(m) }, openContextMenu: null });
   return env;
 }
 const byLabel = (env, label) => env.template.find((i) => i.label === label);
