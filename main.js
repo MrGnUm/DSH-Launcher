@@ -3544,14 +3544,22 @@ function reportInfoText(facts) {
 const runMarkerFile = () => path.join(app.getPath('userData'), 'running.json');
 let previousCrash = null;
 
-function pidAlive(pid) {
-  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+// Прежний экземпляр ещё работает: процесс есть, не «зомби» (завершился, но
+// родитель не забрал код выхода) и это лаунчер — pid мог достаться другой
+// программе.
+function launcherPidAlive(pid) {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const state = stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3);
+    if (state === 'Z' || state === 'X') return false;
+    return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(process.execPath);
+  } catch { return false; } // процесса нет
 }
 
 function checkPreviousRun() {
   try {
     const m = JSON.parse(fs.readFileSync(runMarkerFile(), 'utf8'));
-    if (Number.isInteger(m.pid) && m.pid !== process.pid && !pidAlive(m.pid)) {
+    if (Number.isInteger(m.pid) && m.pid !== process.pid && !launcherPidAlive(m.pid)) {
       previousCrash = m;
       console.log(`[launcher] прошлый запуск (pid ${m.pid}, ${m.version || '?'}, начат ${m.startedAt || '?'}) завершился аварийно`);
     }
