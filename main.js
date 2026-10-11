@@ -2278,6 +2278,7 @@ function appMenuTemplate() {
         { label: tr('Проверить обновления…', 'Check for updates…'), click: () => { void showUpdateCheckDialog(); } },
         { label: tr('Журнал dsh…', 'dsh log…'), click: () => showLogDialog() },
         { label: tr('Открыть папку логов', 'Open logs folder'), click: () => { void openLogsFolder(); } },
+        { label: tr('Сохранить отчёт…', 'Save report…'), click: () => { void saveReport(); } },
         { type: 'separator' },
         { label: tr('О программе', 'About'), click: () => { void showAboutDialog(); } },
       ],
@@ -3210,6 +3211,7 @@ async function showAboutDialog() {
       <div class="actions">
         ${ver.loaded ? '<button onclick="location.href=\'dshlauncher://dialog/copy/\'">' + (copied ? tr('Скопировано', 'Copied') : tr('Скопировать для отчёта', 'Copy for report')) + '</button>' : ''}
         <button onclick="location.href='dshlauncher://dialog/logs/'">${tr('Папка логов', 'Logs folder')}</button>
+        <button onclick="location.href='dshlauncher://menu/report/'">${tr('Сохранить отчёт…', 'Save report…')}</button>
         ${gpu.marker ? '<button onclick="location.href=\'dshlauncher://dialog/gpu-enable/\'">' + tr('Включить GPU снова', 'Re-enable GPU') + '</button>' : ''}
         ${dialogCloseButton()}
       </div>`;
@@ -3393,19 +3395,13 @@ async function pollUpdates() {
 // Плашка «Доступна … X» в правом верхнем углу окна, поверх страницы dsh (как
 // панель поиска — WebContentsView; под ней, если поиск открыт). Висит, пока
 // не закроют: пользователь мог отойти. «Подробнее…» — окно «Обновить … до X…».
-const TOAST_W = 460;
+const TOAST_W = 520;
 const TOAST_H = 58;
 let toastView = null;
 let toastResizeHooked = false;
 
-function toastUrl(kinds) {
-  const u = kinds.map((k) => availableUpdates[k]).filter(Boolean);
-  const title = kinds.length === 1
-    ? tr(`Доступна ${updateName(kinds[0])} ${u[0].version}`, `${updateName(kinds[0])} ${u[0].version} is available`)
-    : tr('Доступны обновления', 'Updates are available');
-  const sub = kinds.length === 1
-    ? tr(`установлена ${u[0].installed}`, `installed: ${u[0].installed}`)
-    : kinds.map((k) => `${updateName(k)} ${availableUpdates[k].version}`).join(', ');
+// Плашка: заголовок, строка пояснения, кнопки (переходы dshlauncher://…) и ×.
+function toastPageUrl({ title, sub, buttons }) {
   const css = `html,body{margin:0;height:100%;background:#151a23;color:#d7dce3;overflow:hidden;
     font:13px system-ui,'Segoe UI',Roboto,Ubuntu,sans-serif}
     body{display:flex;align-items:center;gap:8px;padding:0 8px 0 14px;box-sizing:border-box;
@@ -3413,15 +3409,28 @@ function toastUrl(kinds) {
     .t{flex:1;min-width:0}
     .t b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .t span{color:#9aa4b2;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
-    button{background:#1f2836;border:0;border-radius:7px;color:#d7dce3;height:30px;cursor:pointer;font-size:13px;padding:0 12px}
+    button{background:#1f2836;border:0;border-radius:7px;color:#d7dce3;height:30px;cursor:pointer;font-size:13px;padding:0 12px;white-space:nowrap}
     button:hover{background:#2a3550}
     button.x{width:28px;padding:0;font-size:14px}`;
-  const html = `<!doctype html><html lang="${UI_LANG}"><head><meta charset="utf-8"><title>update-toast</title><style>${css}</style></head><body>
+  const html = `<!doctype html><html lang="${UI_LANG}"><head><meta charset="utf-8"><title>launcher-toast</title><style>${css}</style></head><body>
     <div class="t"><b>${esc(title)}</b><span>${esc(sub)}</span></div>
-    <button onclick="location.href='dshlauncher://toast/open/?k=${kinds[0]}'">${esc(tr('Подробнее…', 'Details…'))}</button>
+    ${buttons.map((b) => `<button onclick="location.href='${b.href}'">${esc(b.label)}</button>`).join('')}
     <button class="x" title="${esc(tr('Закрыть', 'Close'))}" onclick="location.href='dshlauncher://toast/close/'">&#10005;</button>
     </body></html>`;
   return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
+}
+
+function updateToastUrl(kinds) {
+  const u = kinds.map((k) => availableUpdates[k]).filter(Boolean);
+  return toastPageUrl({
+    title: kinds.length === 1
+      ? tr(`Доступна ${updateName(kinds[0])} ${u[0].version}`, `${updateName(kinds[0])} ${u[0].version} is available`)
+      : tr('Доступны обновления', 'Updates are available'),
+    sub: kinds.length === 1
+      ? tr(`установлена ${u[0].installed}`, `installed: ${u[0].installed}`)
+      : kinds.map((k) => `${updateName(k)} ${availableUpdates[k].version}`).join(', '),
+    buttons: [{ label: tr('Подробнее…', 'Details…'), href: `dshlauncher://toast/open/?k=${kinds[0]}` }],
+  });
 }
 
 function placeToast() {
@@ -3433,11 +3442,15 @@ function placeToast() {
 
 function showUpdateToast(kinds) {
   console.log(`[launcher] уведомление: доступна ${kinds.map((k) => `${updateName(k)} ${availableUpdates[k].version}`).join(', ')}`);
+  showToast(updateToastUrl(kinds));
+}
+
+function showToast(url) {
   if (!win || win.isDestroyed() || stopping) return;
   closeUpdateToast();
   toastView = new WebContentsView({ webPreferences: { contextIsolation: true, nodeIntegration: false, spellcheck: false } });
   toastView.setBackgroundColor('#00000000');
-  toastView.webContents.loadURL(toastUrl(kinds)).catch(() => {});
+  toastView.webContents.loadURL(url).catch(() => {});
   win.contentView.addChildView(toastView);
   if (!toastResizeHooked) { win.on('resize', placeToast); toastResizeHooked = true; }
   placeToast();
@@ -3458,6 +3471,12 @@ function onToastRequest(route, url) {
   } else if (route.startsWith('/toast/close/')) {
     console.log('[launcher] уведомление закрыто');
     closeUpdateToast();
+  } else if (route.startsWith('/toast/crash-log/')) {
+    closeUpdateToast();
+    void shell.openPath(fs.existsSync(LAUNCHER_LOG_FILE) ? LAUNCHER_LOG_FILE : LOG_DIR);
+  } else if (route.startsWith('/toast/report/')) {
+    closeUpdateToast();
+    void saveReport();
   }
   return noContentResponse();
 }
@@ -3487,6 +3506,161 @@ function updateNow(kind) {
   if (!availableUpdates[kind]) return;
   process.env.DSH_LAUNCHER_UPDATE_NOW = kind; // новый экземпляр — сразу к установке
   relaunchLauncher(`чтобы обновить ${updateName(kind)} до ${availableUpdates[kind].version}`);
+}
+
+/* ===== reportFileName (чистые функции, тест test/report.js) =====
+   Имя файла отчёта (по местному времени) и текст сведений «ключ: значение». */
+function reportFileName(d) {
+  const p = (n) => String(n).padStart(2, '0');
+  return `dsh-launcher-report-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.tar.gz`;
+}
+
+function reportInfoText(facts) {
+  return facts.map(([k, v]) => `${k}: ${v === undefined || v === null || v === '' ? '—' : v}`).join('\n') + '\n';
+}
+/* ===== end reportFileName ===== */
+
+/* ---------------- прошлый запуск: завершился ли штатно ---------------- */
+
+// При запуске — метка running.json (pid, время, версия), при штатном выходе
+// (will-quit) — удаляется. Осталась, а процесса нет — прошлый запуск
+// завершился аварийно (падение, kill -9, выключение питания): плашка с
+// «Журнал…» и «Сохранить отчёт…».
+const runMarkerFile = () => path.join(app.getPath('userData'), 'running.json');
+let previousCrash = null;
+
+function pidAlive(pid) {
+  try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
+}
+
+function checkPreviousRun() {
+  try {
+    const m = JSON.parse(fs.readFileSync(runMarkerFile(), 'utf8'));
+    if (Number.isInteger(m.pid) && m.pid !== process.pid && !pidAlive(m.pid)) {
+      previousCrash = m;
+      console.log(`[launcher] прошлый запуск (pid ${m.pid}, ${m.version || '?'}, начат ${m.startedAt || '?'}) завершился аварийно`);
+    }
+  } catch { /* метки нет — прошлый завершился штатно (или первый запуск) */ }
+  try {
+    fs.mkdirSync(path.dirname(runMarkerFile()), { recursive: true });
+    let version = null;
+    try { version = require('./package.json').version; } catch { /* noop */ }
+    fs.writeFileSync(runMarkerFile(), JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), version }));
+  } catch (e) { console.error('[launcher] running.json:', e.message); }
+}
+
+function clearRunMarker() {
+  try { fs.unlinkSync(runMarkerFile()); } catch { /* noop */ }
+}
+
+function maybeShowCrashNotice() {
+  if (!previousCrash) return;
+  const m = previousCrash;
+  previousCrash = null; // один раз
+  console.log('[launcher] уведомление: прошлый запуск завершился аварийно');
+  let when = '';
+  try { when = new Date(m.startedAt).toLocaleString(UI_LANG === 'ru' ? 'ru-RU' : 'en-US'); } catch { /* noop */ }
+  showToast(toastPageUrl({
+    title: tr('В прошлый раз лаунчер завершился аварийно', 'The launcher closed unexpectedly last time'),
+    sub: when ? tr(`запуск от ${when}`, `started ${when}`) : '',
+    buttons: [
+      { label: tr('Журнал…', 'Log…'), href: 'dshlauncher://toast/crash-log/' },
+      { label: tr('Сохранить отчёт…', 'Save report…'), href: 'dshlauncher://toast/report/' },
+    ],
+  }));
+}
+
+/* ---------------- отчёт для поддержки ---------------- */
+
+// «Справка → Сохранить отчёт…»: архив .tar.gz — сведения о системе и
+// версиях, журнал лаунчера, хвост журнала dsh, настройки; токены и ключи
+// скрыты (redactLog). DSH_LAUNCHER_REPORT_PATH — куда сохранить без диалога
+// (тесты).
+let lastReportPath = null;
+
+async function reportFacts() {
+  const [lver, dver] = await Promise.all([launcherVersionRaw(), dshVersionRaw()]);
+  let osName = '';
+  try { osName = (/^PRETTY_NAME="?([^"\n]*)/m.exec(fs.readFileSync('/etc/os-release', 'utf8')) || [])[1] || ''; } catch { /* noop */ }
+  return [
+    ['DeepSeek Harness Launcher', lver],
+    [tr('бэкенд dsh', 'dsh backend'), dver],
+    ['Electron', process.versions.electron],
+    ['Chromium', process.versions.chrome],
+    ['Node.js', process.versions.node],
+    [tr('ОС', 'OS'), osName],
+    [tr('ядро', 'kernel'), `${os.release()} (${os.arch()})`],
+    [tr('рабочий стол', 'desktop'), process.env.XDG_CURRENT_DESKTOP],
+    [tr('сессия', 'session'), process.env.XDG_SESSION_TYPE],
+    [tr('режим окна', 'window mode'), app.commandLine.getSwitchValue('ozone-platform') || 'x11'],
+    [tr('GPU-ускорение', 'GPU acceleration'), gpuStatusText(gpuStatusNow())],
+    [tr('язык окна', 'window language'), UI_LANG],
+    [tr('путь к dsh', 'path to dsh'), DSH_BIN],
+    [tr('аргументы dsh', 'dsh arguments'), DSH_ARGS.join(' ')],
+    [tr('рабочая папка', 'working folder'), CWD],
+    [tr('порт', 'port'), PORT],
+    [tr('откуда настройки', 'settings source'), Object.entries(CONFIG.src).map(([k, v]) => `${k}=${v}`).join(', ')],
+    [tr('лаунчер работает', 'launcher uptime'), `${Math.round(process.uptime())} s`],
+    [tr('отчёт создан', 'report created'), new Date().toISOString()],
+  ];
+}
+
+async function saveReport() {
+  let dest = process.env.DSH_LAUNCHER_REPORT_PATH || null;
+  if (!dest) {
+    const parent = dialogWin && !dialogWin.isDestroyed() ? dialogWin : win;
+    let dir = os.homedir();
+    try { dir = app.getPath('downloads'); } catch { /* noop */ }
+    const r = await dialog.showSaveDialog(parent, {
+      title: tr('Сохранить отчёт', 'Save report'),
+      defaultPath: path.join(dir, reportFileName(new Date())),
+      filters: [{ name: 'tar.gz', extensions: ['gz'] }],
+    });
+    if (r.canceled || !r.filePath) return;
+    dest = r.filePath;
+  }
+  let tmp = null;
+  try {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-launcher-report-'));
+    const dir = path.join(tmp, 'dsh-launcher-report');
+    fs.mkdirSync(dir);
+    const put = (name, text) => fs.writeFileSync(path.join(dir, name), redactLog(text));
+    put('info.txt', reportInfoText(await reportFacts()));
+    for (const f of [LAUNCHER_LOG_FILE + '.1', LAUNCHER_LOG_FILE]) {
+      try { put(path.basename(f), fs.readFileSync(f, 'utf8')); } catch { /* нет файла */ }
+    }
+    const dshTail = logTail(LOG_FILE, 5000, 1024 * 1024);
+    if (dshTail !== null) put('dsh.log.tail', dshTail + '\n');
+    put('settings.json', JSON.stringify(loadSettings() || {}, null, 2) + '\n');
+    try { put('gpu.json', JSON.stringify(app.getGPUFeatureStatus(), null, 2) + '\n'); } catch { /* noop */ }
+    await execFileAsync('tar', ['-czf', dest, '-C', tmp, 'dsh-launcher-report']);
+    lastReportPath = dest;
+    console.log(`[launcher] отчёт сохранён: ${dest}`);
+    showReportDialog(null);
+  } catch (e) {
+    console.error('[launcher] отчёт:', e.message);
+    showReportDialog(e.message);
+  } finally {
+    if (tmp) try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* noop */ }
+  }
+}
+
+function showReportDialog(error) {
+  const title = tr('Отчёт', 'Report');
+  const gen = openDialog(title);
+  if (gen === null) return;
+  dialogCopyText = '';
+  dialogShow(gen, () => dialogPage(title, error
+    ? `<p class="note err">${esc(tr('Не удалось сохранить отчёт: ', 'Could not save the report: ') + error)}</p>
+       <div class="actions">${dialogCloseButton()}</div>`
+    : `<p>${tr('Отчёт сохранён:', 'Report saved:')} <code>${esc(lastReportPath)}</code></p>
+       <p class="hint">${tr('Токены и ключи в нём скрыты. Приложите файл к сообщению о проблеме на',
+                            'Tokens and keys in it are hidden. Attach the file to an issue on')}
+         <a href="https://github.com/${UPDATE_GITHUB_REPO}/issues/new" target="_blank">GitHub</a>.</p>
+       <div class="actions">
+         <button onclick="location.href='dshlauncher://dialog/report-show/'">${tr('Показать в папке', 'Show in folder')}</button>
+         ${dialogCloseButton()}
+       </div>`));
 }
 
 /* ---------------- запуск dsh и доведение окна до GUI ---------------- */
@@ -3818,6 +3992,7 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 async function onReady() {
+  checkPreviousRun(); // блокировка «один экземпляр» уже наша
   installSignalHandlers();
   buildAppMenu(); // «Файл», «Правка», «Вид», «Справка» (подписи следуют за
                   // языком окна, при RU|EN собирается заново)
@@ -3853,6 +4028,8 @@ async function onReady() {
       if (route.startsWith('/update-now/')) { updateNow(new URL(request.url).searchParams.get('k')); return noContentResponse(); }
       if (route.startsWith('/find/')) return onFindRequest(route, request.url);
       if (route.startsWith('/dialog/logs/')) { void openLogsFolder(); return noContentResponse(); }
+      if (route.startsWith('/menu/report/')) { void saveReport(); return noContentResponse(); }
+      if (route.startsWith('/dialog/report-show/')) { if (lastReportPath) shell.showItemInFolder(lastReportPath); return noContentResponse(); }
       if (route.startsWith('/dialog/log-refresh/')) { if (dialogRender) dialogRender(false); return noContentResponse(); }
       if (route.startsWith('/menu/log/')) { showLogDialog(); return noContentResponse(); }
       if (route.startsWith('/menu/settings/')) { showSettingsDialog(); return noContentResponse(); }
@@ -3909,7 +4086,9 @@ async function onReady() {
   }, 8000);
   win.webContents.on('did-finish-load', () => {
     // первая загрузка GUI dsh — показать «Что нового», если лаунчер обновился
-    try { if (new URL(win.webContents.getURL()).origin === new URL(PLAIN_URL).origin) void maybeShowWhatsNew(); } catch { /* data: */ }
+    try {
+      if (new URL(win.webContents.getURL()).origin === new URL(PLAIN_URL).origin) { void maybeShowWhatsNew(); maybeShowCrashNotice(); }
+    } catch { /* data: */ }
     // перезагрузка под открытым диалогом (watchdog) сбрасывает затемнение
     if (dialogWin && !dialogWin.isDestroyed()) { dimKey = null; void dimMain(true); }
     try { console.log('[launcher] страница загружена:', win.webContents.getURL().slice(0, 120)); } catch { /* noop */ }
@@ -4008,7 +4187,7 @@ app.on('before-quit', (e) => {
 });
 
 // страховка: если before-quit почему-то не сработала — жёстко
-app.on('will-quit', () => killDshNow());
+app.on('will-quit', () => { killDshNow(); clearRunMarker(); });
 
 // страховка на «жёсткое» завершение самого лаунчера: SIGTERM/SIGINT/SIGHUP (pkill,
 // завершение сессии) и exit процесса. Поймать SIGKILL, отправленный самому

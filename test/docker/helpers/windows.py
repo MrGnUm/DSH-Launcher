@@ -239,9 +239,9 @@ class SettingsDialog(Dialog):
         self.go('dshlauncher://settings/relaunch/')
 
 
-class UpdateToast:
-    """Плашка «Доступна … X» в углу главного окна (своя страница CDP)."""
-    TITLE = '^update-toast$'
+class Toast:
+    """Плашка в углу главного окна (своя страница CDP): обновление, сбой."""
+    TITLE = '^launcher-toast$'
 
     def __init__(self, drv):
         self.drv = drv
@@ -249,9 +249,10 @@ class UpdateToast:
     def text(self):
         return ' '.join((self.drv.eval('document.body ? document.body.innerText : ""', page=self.TITLE) or '').split())
 
-    def wait_shown(self, timeout=30):
-        assert wait_for(lambda: self.drv.page(self.TITLE) is not None and 'Details' in self.text(), timeout, 0.25), \
-            'плашка обновления не появилась'
+    def wait_shown(self, pattern='Details', timeout=30):
+        rx = re.compile(pattern)
+        assert wait_for(lambda: self.drv.page(self.TITLE) is not None and rx.search(self.text()), timeout, 0.25), \
+            f'плашка /{pattern}/ не появилась'
         return self
 
     def is_shown(self):
@@ -264,6 +265,13 @@ class UpdateToast:
 
     def close(self):
         self.drv.go('dshlauncher://toast/close/', page=self.TITLE)
+
+
+UpdateToast = Toast  # плашка обновления — та же
+
+
+class ReportDialog(Dialog):
+    TITLE = '^Report$'
 
 
 class UpdateNowDialog(Dialog):
