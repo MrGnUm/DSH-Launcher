@@ -7,6 +7,16 @@ The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
 
 ## [Unreleased]
 
+### Added
+
+- **“Help → Save report…”** (also a button in “About”): an archive with
+  versions, system, session and GPU details, settings, the launcher log and
+  the tail of the dsh log — tokens and keys hidden. Handy to attach to an
+  issue.
+- **A notice after a crash.** If the launcher closed unexpectedly last time,
+  the next start shows a notice in the window corner with “Log…” and “Save
+  report…” buttons.
+
 ### Fixed
 
 - **“Restart the launcher”** (Settings window, “Update now”): the new

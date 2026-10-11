@@ -125,6 +125,13 @@ A small Electron app: a window that opens **DeepSeek Harness**
 - **Logs and diagnostics:** “Help → Open logs folder”; “About” shows the
   logs path and the GPU acceleration state. If the GPU was turned off after
   GPU process crashes, a “Re-enable GPU” button is there too.
+  - “Help → Save report…” (also a button in “About”) — an archive
+    `dsh-launcher-report-<date>.tar.gz`: versions, system, session, GPU,
+    settings, the launcher log and the tail of the dsh log; tokens and keys
+    hidden. Attach it to an issue on GitHub.
+  - If the launcher closed unexpectedly last time (a crash, `kill -9`, a
+    power loss), the next start shows a notice in the window corner with
+    “Log…” and “Save report…” buttons.
 
 - **Right-click context menu** — both in the dsh GUI and on the launcher's
   own pages: in a text field “Cut”, “Copy”, “Paste”, “Select all”; on
