@@ -3094,8 +3094,8 @@ let previousCrash = null;
 function launcherPidAlive(pid) {
   try {
     const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
-    const state = stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3);
-    if (state === 'Z' || state === 'X') return false;
+    const st = stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3);
+    if (st === 'Z' || st === 'X') return false;
     return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(process.execPath);
   } catch { return false; } // процесса нет
 }
@@ -3505,19 +3505,19 @@ function startWatchdog() {
     state.portState = (await portOpen()) ? 'up' : 'down'; // базовое состояние, без срабатываний
     setInterval(async () => {
       if (state.stopping) return;
-      const state = (await portOpen()) ? 'up' : 'down';
-      if (state === state.portState) return;
-      if (state === 'up' && state.launching) {
-        state.portState = state; // окно доведёт до GUI сам launchDsh — не мешаем ему второй навигацией
+      const now = (await portOpen()) ? 'up' : 'down';
+      if (now === state.portState) return;
+      if (now === 'up' && state.launching) {
+        state.portState = now; // окно доведёт до GUI сам launchDsh — не мешаем ему второй навигацией
         return;
       }
-      if (state === 'up') {
+      if (now === 'up') {
         console.log(`[launcher] dsh снова отвечает на порту ${PORT} — обновляю окно`);
-        state.portState = state;
+        state.portState = now;
         recoverWindow();
       } else {
         console.log(`[launcher] порт ${PORT} закрыт — если dsh перезапустят, окно восстановится само`);
-        state.portState = state;
+        state.portState = now;
       }
     }, 1500);
   })();
