@@ -42,152 +42,20 @@ const { DEFAULT_PORT, DEFAULT_PROFILE, effectiveConfig, settingValue, restartNee
 const { releasesCacheMode, releasesCacheFresh, updatePollMs, announceUpdates, proxyUrlFromRule } = require('./src/updates-logic');
 const { WIN_DEFAULT, WIN_MIN, contextMenuItems, keyAction, windowSize, gpuStatus, reportFileName, reportInfoText } = require('./src/ui');
 
-// Только для разработки и тестов (CI): токен GitHub для запроса списка
-// релизов — лимит 5000 запросов в час вместо 60 без авторизации. Читаем и
-// убираем из окружения первым делом — до любого запуска дочерних процессов:
-// его не унаследуют dsh, npm и плагины. Значение нигде не печатается.
-const GITHUB_TOKEN = process.env.DSH_LAUNCHER_GITHUB_TOKEN || '';
-delete process.env.DSH_LAUNCHER_GITHUB_TOKEN;
-// «Обновить сейчас» (окно обновления во время работы) перезапускает лаунчер с
-// этой переменной: новый экземпляр сразу ставит обновление, без вопроса.
-const UPDATE_NOW = /^(launcher|dsh)$/.test(process.env.DSH_LAUNCHER_UPDATE_NOW || '') ? process.env.DSH_LAUNCHER_UPDATE_NOW : null;
-delete process.env.DSH_LAUNCHER_UPDATE_NOW;
+// Параметры запуска и журнал лаунчера — первыми: env.js убирает токен CI из
+// окружения, log.js начинает писать launcher.log.
+const {
+  GITHUB_TOKEN, UPDATE_NOW, SETTINGS_FILE, loadSettings, CONFIG, DSH_BIN_DEFAULT, DSH_BIN_EXPLICIT, DSH_ARGS, CWD,
+  HOST, PORT, PLAIN_URL, START_TIMEOUT, LOG_DIR, LOG_FILE, LAUNCHER_LOG_FILE, MAX_LOG_BYTES, LANG_FORCED,
+} = require('./src/env');
+const { rotateLog, startLauncherLog, openDshLog } = require('./src/log');
+startLauncherLog();
 
-// Разбор строки аргументов как в shell: пробелы разделяют, '…' и "…"
-// группируют, \ экранирует следующий символ (внутри '…' — нет).
-
-
-/* ========================= настройки ========================= */
-
-// Окно «Настройки» пишет ~/.config/dsh-launcher/settings.json (это же userData
-// лаунчера — путь считаем сами: настройки нужны до app.setName). Переменные
-// окружения важнее файла — ими пользуются тесты и те, кто настроил лаунчер
-// раньше; поле в окне тогда неактивно.
-const SETTINGS_FILE = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'),
-  'dsh-launcher', 'settings.json');
-
-function loadSettings() {
-  try { const s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')); return s && typeof s === 'object' ? s : {}; }
-  catch { return {}; }
-}
-
-
-
-
-const CONFIG = effectiveConfig(process.env, loadSettings(), os.homedir());
-
-const DSH_BIN_DEFAULT = '/usr/bin/dsh';
 // путь к dsh задан явно (переменная DSH_BIN или «Настройки»); иначе, если
 // /usr/bin/dsh нет, — ищется в PATH, npm prefix, nvm и т.п. (см. findDsh),
 // найденный путь запоминается
-const DSH_BIN_EXPLICIT = Boolean(CONFIG.dshBin);
 state.dshBin = CONFIG.dshBin || DSH_BIN_DEFAULT;
-const DSH_ARGS = CONFIG.args;
-const CWD = CONFIG.cwd; // рабочая директория для dsh
-const HOST = '127.0.0.1';
-const PORT = CONFIG.port;
-const PLAIN_URL = `http://${HOST}:${PORT}/`;
-const START_TIMEOUT = Number(process.env.DSH_START_TIMEOUT_MS || 120000); // сколько ждать старта
-// в установленной версии (run.sh ставит DSH_LOG_DIR) — в ~/.local/state,
-// в dev-режиме — рядом с приложением
-const LOG_DIR = process.env.DSH_LOG_DIR || path.join(__dirname, 'logs');
-const LOG_FILE = path.join(LOG_DIR, 'dsh.log');
-const LAUNCHER_LOG_FILE = path.join(LOG_DIR, 'launcher.log');
-// 2 МБ — дальше файл сдвигается в *.1 (DSH_LAUNCHER_LOG_MAX_BYTES — для тестов).
-// Старый *.1 при этом заменяется: на каждый журнал не больше двух файлов.
-const MAX_LOG_BYTES = Number(process.env.DSH_LAUNCHER_LOG_MAX_BYTES) > 0
-  ? Number(process.env.DSH_LAUNCHER_LOG_MAX_BYTES) : 2 * 1024 * 1024;
 
-// Ротация при открытии: файл больше MAX_LOG_BYTES — сдвигаем в <файл>.1.
-function rotateLog(file) {
-  try {
-    const st = fs.statSync(file);
-    if (st.size <= MAX_LOG_BYTES) return null;
-    fs.renameSync(file, file + '.1');
-    return st.size;
-  } catch { return null; } // файла ещё нет — ротировать нечего
-}
-
-// Журнал лаунчера (launcher.log): всё, что лаунчер выводит в консоль, — с
-// временем; при запуске с ярлыка консоль никуда не пишется. Строки «[dsh] …»
-// не дублируем — они в dsh.log. Токены скрыты (redactLog). Пишем синхронно:
-// строк немного, а при сбое последние не потеряются.
-function startLauncherLog() {
-  const rotated = rotateLog(LAUNCHER_LOG_FILE);
-  try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch { /* noop */ }
-  let ok = true;
-  let size = 0;
-  try { size = fs.statSync(LAUNCHER_LOG_FILE).size; } catch { /* нового ещё нет */ }
-  const write = (text) => {
-    if (!ok) return;
-    try {
-      // и во время работы (лаунчер может быть открыт неделями) — до записи,
-      // чтобы текущий файл всегда был
-      const n = Buffer.byteLength(text);
-      if (size > 0 && size + n > MAX_LOG_BYTES) { fs.renameSync(LAUNCHER_LOG_FILE, LAUNCHER_LOG_FILE + '.1'); size = 0; }
-      fs.appendFileSync(LAUNCHER_LOG_FILE, text);
-      size += n;
-    } catch { ok = false; } // нет доступа — журнал без файла, лаунчер работает
-  };
-  for (const level of ['log', 'warn', 'error']) {
-    const orig = console[level].bind(console);
-    console[level] = (...args) => {
-      orig(...args);
-      const text = util.format(...args);
-      if (text.startsWith('[dsh]')) return;
-      const d = new Date();
-      const t = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().replace('T', ' ').slice(0, 23); // местное время
-      write(redactLog(text).split('\n').map((l) => `${t} ${l}`).join('\n') + '\n');
-    };
-  }
-  let version = '?';
-  try { version = require('./package.json').version; } catch { /* noop */ }
-  write(`\n===== DeepSeek Harness Launcher ${version}, pid ${process.pid}, ${new Date().toISOString()} =====\n`);
-  if (rotated) console.log(`[launcher] лог прокручен: launcher.log (${rotated} Б) -> launcher.log.1`);
-}
-startLauncherLog();
-
-// Журнал dsh с ротацией и во время работы (dsh бывает разговорчив, а лаунчер
-// открыт неделями): строка не помещается в MAX_LOG_BYTES — файл сдвигается в
-// <файл>.1, строка пишется в новый. Синхронно, через дескриптор: у потока
-// (createWriteStream) файл открывается позже, и после переименования поток
-// писал бы снова в новый файл.
-function openDshLog(file) {
-  let size = 0;
-  try { size = fs.statSync(file).size; } catch { /* файла ещё нет */ }
-  let fd = null;
-  try { fd = fs.openSync(file, 'a'); } catch (e) { console.error('[launcher] dsh.log:', e.message); }
-  return {
-    write(text) {
-      if (fd === null) return;
-      try {
-        const n = Buffer.byteLength(text);
-        if (size > 0 && size + n > MAX_LOG_BYTES) {
-          fs.closeSync(fd);
-          fd = null;
-          fs.renameSync(file, file + '.1');
-          fd = fs.openSync(file, 'a');
-          size = 0;
-        }
-        fs.writeSync(fd, text);
-        size += n;
-      } catch (e) {
-        console.error('[launcher] dsh.log:', e.message);
-      }
-    },
-    end() {
-      if (fd !== null) { try { fs.closeSync(fd); } catch { /* noop */ } fd = null; }
-    },
-  };
-}
-
-// Язык окон лаунчера: DSH_LAUNCHER_LANG=ru|en, иначе выбор переключателем
-// RU | EN в окне (userData/ui-lang.json, подхватывается в onReady), иначе по
-// локали системы (LC_ALL / LC_MESSAGES / LANG): ru* — русский, иначе английский.
-const LANG_FORCED = (() => {
-  const v = String(process.env.DSH_LAUNCHER_LANG || '').toLowerCase();
-  return v === 'ru' || v === 'en' ? v : null;
-})();
 let UI_LANG = LANG_FORCED || (/^ru/i.test(process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || '') ? 'ru' : 'en');
 i18n.setLang(UI_LANG);
 

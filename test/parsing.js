@@ -96,8 +96,10 @@ assert.strictEqual(proxyUrlFromRule('proxy p:1'), 'http://p:1', 'регистр 
 // ---- DSH_LAUNCHER_GITHUB_TOKEN: только для CI, наружу не уходит ----
 {
   const { mainSrc } = require('./_extract');
-  const del = mainSrc.indexOf('delete process.env.DSH_LAUNCHER_GITHUB_TOKEN');
-  assert.ok(del > 0, 'переменная токена удаляется из окружения');
+  const envSrc = require('fs').readFileSync(require('path').join(__dirname, '..', 'src', 'env.js'), 'utf8');
+  assert.ok(envSrc.includes('delete process.env.DSH_LAUNCHER_GITHUB_TOKEN'), 'переменная токена удаляется из окружения (src/env.js)');
+  const del = mainSrc.indexOf("require('./src/env')");
+  assert.ok(del > 0, 'main.js подключает src/env.js');
   const firstChild = Math.min(...['execFileSync(', 'spawn(', 'execFileAsync(']
     .map((k) => mainSrc.indexOf(k, mainSrc.indexOf("require('child_process')") + 30)).filter((x) => x > 0));
   assert.ok(del < firstChild, 'токен убран из окружения до первого запуска дочернего процесса');
