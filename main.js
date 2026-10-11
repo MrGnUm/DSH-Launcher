@@ -18,7 +18,7 @@
  *    SIGKILL лаунчеру перехватить нельзя — тот случай остаётся незакрытым.
  */
 
-const { app, BrowserWindow, WebContentsView, Menu, protocol, net: electronNet, session, screen, dialog, shell, clipboard } = require('electron');
+const { app, BrowserWindow, WebContentsView, Menu, Tray, nativeImage, protocol, net: electronNet, session, screen, dialog, shell, clipboard } = require('electron');
 const { spawn, execFile, execFileSync } = require('child_process');
 const util = require('util');
 const { promisify } = util;
@@ -2321,6 +2321,7 @@ function buildAppMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate()));
   // На Linux setApplicationMenu ставит меню всем окнам — у окна-диалога его быть не должно.
   if (dialogWin && !dialogWin.isDestroyed()) dialogWin.setMenu(null);
+  if (tray) tray.setContextMenu(trayMenu());
 }
 
 /* ===== contextMenuItems (чистая функция, тест test/menu.js) =====
@@ -2914,6 +2915,8 @@ function settingValue(key, raw) {
       return { value: v };
     case 'checkUpdates':
     case 'pollUpdates':
+    case 'closeToTray':
+    case 'attention':
     case 'spellcheck':
       if (v !== 'true' && v !== 'false') return { error: 'bad value' };
       return { value: v === 'true' };
@@ -2981,6 +2984,8 @@ function onSettingsSet(url) {
       else if (key === 'profile') saveSettings({ profile: r.value === DEFAULT_PROFILE ? null : r.value });
       else if (key === 'checkUpdates') saveSettings({ checkUpdates: r.value ? null : false });
       else if (key === 'pollUpdates') { saveSettings({ pollUpdates: r.value ? null : false }); setUpdatePolling(r.value); }
+      else if (key === 'closeToTray') { saveSettings({ closeToTray: r.value ? true : null }); setTray(r.value); }
+      else if (key === 'attention') saveSettings({ attention: r.value ? null : false });
       else saveSettings({ [key]: r.value || null }); // dshPath, cwd: '' — по умолчанию
       console.log(`[launcher] настройки: ${key} = ${key === 'dshPath' || key === 'cwd' ? (r.value || '(по умолчанию)') : r.value}`);
       settingsNote = { text: tr('Сохранено.', 'Saved.'), error: false };
@@ -3100,6 +3105,12 @@ function showSettingsDialog() {
         <div class="row"><span>${tr('Порт', 'Port')}</span>
           <input id="port" type="number" min="1024" max="65535" value="${next.port}" onchange="set('port', this.value)"${locked('port')}>
           ${envNote('port', 'DSH_PORT')}</div>
+
+        <h4>${tr('Окно', 'Window')}</h4>
+        <div class="row">${check('closeToTray', closeToTrayOn(), tr('Крестик прячет окно в трей — dsh работает дальше', 'The close button hides the window to the tray — dsh keeps running'))}</div>
+        <p class="hint">${tr('Нужен трей на рабочем столе (в GNOME — расширение AppIndicator, в Ubuntu оно есть). Спрятанное окно вернёт и повторный запуск лаунчера.',
+                             'Needs a system tray on the desktop (in GNOME — the AppIndicator extension, included in Ubuntu). Starting the launcher again also brings the hidden window back.')}</p>
+        <div class="row">${check('attention', attentionOn(), tr('Привлекать внимание, когда агент закончил ответ, а окно не в фокусе', 'Draw attention when the agent finishes and the window is not focused'))}</div>
 
         <h4>${tr('Графика', 'Graphics')}</h4>
         <div class="row"><span>${tr('GPU-ускорение', 'GPU acceleration')}</span>
@@ -3716,6 +3727,116 @@ function showReportDialog(error) {
        </div>`));
 }
 
+/* ---------------- трей и работа в фоне ---------------- */
+
+// «Настройки → Окно»: closeToTray — крестик прячет окно в трей, dsh работает
+// дальше (по умолчанию выключено: без поддержки трея на рабочем столе —
+// в «чистом» GNOME нет — окно пропало бы без значка; вернуть его можно и
+// повторным запуском лаунчера). attention — привлечь внимание, когда агент
+// закончил ответ, а окно не в фокусе (по умолчанию включено).
+let tray = null;
+let trayIcons = null;
+
+const closeToTrayOn = () => (loadSettings() || {}).closeToTray === true;
+const attentionOn = () => (loadSettings() || {}).attention !== false;
+
+// Значок трея и он же с оранжевой точкой («агент закончил»).
+function makeTrayIcons() {
+  let base = nativeImage.createFromPath(path.join(__dirname, 'icon.png'));
+  if (base.isEmpty()) base = nativeImage.createFromPath('/usr/share/icons/hicolor/256x256/apps/dsh-launcher.png');
+  const normal = base.isEmpty() ? base : base.resize({ width: 24, height: 24, quality: 'best' });
+  if (normal.isEmpty()) return { normal, attention: normal };
+  const { width: w, height: h } = normal.getSize();
+  const px = Buffer.from(normal.toBitmap()); // BGRA
+  const cx = w - 6, cy = h - 6, r = 5;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const d = Math.hypot(x - cx, y - cy);
+      if (d > r + 0.5) continue;
+      const i = (y * w + x) * 4;
+      const ring = d > r - 1.2; // тёмная обводка — точку видно и на светлой панели
+      px[i] = ring ? 0x15 : 0x0b; px[i + 1] = ring ? 0x11 : 0x9e; px[i + 2] = ring ? 0x0f : 0xf5; px[i + 3] = 0xff;
+    }
+  }
+  return { normal, attention: nativeImage.createFromBitmap(px, { width: w, height: h }) };
+}
+
+function trayMenu() {
+  return Menu.buildFromTemplate([
+    { label: tr('Открыть DeepSeek Harness', 'Open DeepSeek Harness'), click: () => showMainWindow() },
+    { label: tr('Перезапустить dsh…', 'Restart dsh…'), click: () => { showMainWindow(); void restartDsh(); } },
+    { type: 'separator' },
+    { label: tr('Выйти', 'Quit'), click: () => app.quit() },
+  ]);
+}
+
+function setTray(on) {
+  if (Boolean(tray) === Boolean(on)) return;
+  if (on) {
+    if (!trayIcons) trayIcons = makeTrayIcons();
+    tray = new Tray(trayIcons.normal);
+    tray.setToolTip('DeepSeek Harness');
+    tray.setContextMenu(trayMenu());
+    tray.on('click', () => showMainWindow());
+    console.log('[launcher] трей включён: крестик прячет окно, dsh работает дальше');
+  } else {
+    tray.destroy();
+    tray = null;
+    console.log('[launcher] трей выключен');
+    if (win && !win.isDestroyed() && !win.isVisible()) showMainWindow(); // не оставить окно спрятанным без значка
+  }
+}
+
+function setTrayAttention(on) {
+  if (!tray || !trayIcons) return;
+  tray.setImage(on ? trayIcons.attention : trayIcons.normal);
+  tray.setToolTip(on ? tr('DeepSeek Harness — агент закончил ответ', 'DeepSeek Harness — the agent has finished') : 'DeepSeek Harness');
+}
+
+function showMainWindow() {
+  if (!win || win.isDestroyed()) return;
+  const wasHidden = !win.isVisible();
+  win.show();
+  if (win.isMinimized()) win.restore();
+  win.focus();
+  win.flashFrame(false);
+  setTrayAttention(false);
+  if (wasHidden) console.log('[launcher] окно показано из трея');
+}
+
+// Крестик при включённом трее — спрятать окно (не при выходе и перезапуске).
+function onMainWindowClose(e) {
+  if (!tray || !closeToTrayOn() || stopping || relaunchRequested || restarting) return;
+  e.preventDefault();
+  win.hide();
+  console.log('[launcher] окно спрятано в трей — dsh работает дальше');
+}
+
+// Агент закончил ответ: пока он отвечает, в чате GUI dsh есть индикатор
+// [data-chat-running] (только у открытой в окне сессии; это внутренняя
+// деталь интерфейса dsh — если её переименуют, сигнал просто перестанет
+// срабатывать). Проверка раз в 2 с; переход «работал → нет» при окне не в
+// фокусе — мигание кнопки на панели задач, у спрятанного — точка на значке
+// трея.
+const AGENT_POLL_MS = 2000;
+let agentRunning = false;
+
+async function pollAgentState() {
+  if (!win || win.isDestroyed() || stopping) return;
+  try { if (new URL(win.webContents.getURL()).origin !== new URL(PLAIN_URL).origin) { agentRunning = false; return; } } catch { return; }
+  let running;
+  try { running = await win.webContents.executeJavaScript("!!document.querySelector('[data-chat-running]')", true); } catch { return; }
+  if (running === agentRunning) return;
+  agentRunning = running;
+  if (running) { console.log('[launcher] агент отвечает'); return; }
+  const hidden = !win.isVisible();
+  const away = hidden || !win.isFocused();
+  console.log(`[launcher] агент закончил ответ${hidden ? ' — окно в трее' : away ? ' — окно не в фокусе' : ''}`);
+  if (!away || !attentionOn()) return;
+  if (hidden) { setTrayAttention(true); console.log('[launcher] значок трея: агент закончил ответ'); }
+  else { win.flashFrame(true); console.log('[launcher] кнопка окна на панели задач мигает'); }
+}
+
 /* ---------------- запуск dsh и доведение окна до GUI ---------------- */
 
 // Защита от повторного запуска: двойной клик «Проверить ещё раз» или
@@ -4035,12 +4156,7 @@ async function onInstallRun() {
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.focus();
-    }
-  });
+  app.on('second-instance', () => showMainWindow()); // в т.ч. спрятанное в трей
   app.whenReady().then(onReady);
 }
 
@@ -4054,6 +4170,8 @@ async function onReady() {
   // их ждём не дольше UPDATE_CHECK_TIMEOUT.
   startUpdateChecks();
   if (CONFIG.pollUpdates) setUpdatePolling(true);
+  if (closeToTrayOn()) setTray(true);
+  setInterval(() => { void pollAgentState(); }, AGENT_POLL_MS);
   protocol.handle('dshlauncher', (request) => {
     try {
       const route = launcherRoute(request.url);
@@ -4081,6 +4199,7 @@ async function onReady() {
       if (route.startsWith('/update-now/')) { updateNow(new URL(request.url).searchParams.get('k')); return noContentResponse(); }
       if (route.startsWith('/find/')) return onFindRequest(route, request.url);
       if (route.startsWith('/dialog/logs/')) { void openLogsFolder(); return noContentResponse(); }
+      if (route.startsWith('/window/close/')) { if (win && !win.isDestroyed()) win.close(); return noContentResponse(); }
       if (route.startsWith('/menu/report/')) { void saveReport(); return noContentResponse(); }
       if (route.startsWith('/dialog/report-show/')) { if (lastReportPath) shell.showItemInFolder(lastReportPath); return noContentResponse(); }
       if (route.startsWith('/dialog/log-refresh/')) { if (dialogRender) dialogRender(false); return noContentResponse(); }
@@ -4116,6 +4235,8 @@ async function onReady() {
   });
   if (size.maximized) win.maximize();
   trackWindowState(win);
+  win.on('close', onMainWindowClose);
+  win.on('focus', () => { win.flashFrame(false); setTrayAttention(false); });
   initSpellcheck();
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) shell.openExternal(url);

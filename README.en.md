@@ -100,6 +100,13 @@ A small Electron app: a window that opens **DeepSeek Harness**
     versions, whether to offer the marketplace plugin;
   - starting dsh — the dsh program (automatic or a chosen file), profile,
     working folder, port (the launcher passes it to dsh: `--port`);
+  - window — “The close button hides the window to the tray” (dsh keeps
+    running; the icon menu: “Open”, “Restart dsh”, “Quit”; needs a system
+    tray — in GNOME the AppIndicator extension, included in Ubuntu; starting
+    the launcher again also brings the hidden window back), “Draw attention
+    when the agent finishes” (window not focused — the taskbar button
+    flashes, in the tray — a dot on the icon; only the session open in the
+    window is seen);
   - graphics — GPU acceleration (Auto / Off, with the current state), window
     on Wayland (Auto / Wayland / X11 — if the window is invisible).
 

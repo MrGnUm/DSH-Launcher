@@ -29,7 +29,7 @@ mkdir -p \
   "$STAGE/usr/share/icons/hicolor/256x256/apps"
 
 # --- приложение ---
-cp main.js package.json "$STAGE/opt/$NAME/"
+cp main.js package.json icon.png "$STAGE/opt/$NAME/"
 cp deb/run.sh "$STAGE/opt/$NAME/run.sh"
 chmod 755 "$STAGE/opt/$NAME/run.sh"
 cp -a node_modules/electron/dist "$STAGE/opt/$NAME/electron"

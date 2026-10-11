@@ -5,6 +5,19 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
 
+## [Unreleased]
+
+### Added
+
+- **Tray and background mode.** “Settings → Window → The close button hides
+  the window to the tray”: the window closes, dsh keeps running; the icon
+  menu has “Open”, “Restart dsh”, “Quit”. Off by default: not every desktop
+  has a tray (in GNOME — the AppIndicator extension, included in Ubuntu).
+  Starting the launcher again also brings the hidden window back.
+- **“The agent has finished” signal.** Window not focused — its taskbar
+  button flashes; hidden to the tray — a dot appears on the icon. Only the
+  session open in the window is seen. Turned off in “Settings → Window”.
+
 ## [1.11.1] — 2026-10-12
 
 ### Fixed
