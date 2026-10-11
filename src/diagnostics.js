@@ -63,7 +63,7 @@ function maybeShowCrashNotice() {
   previousCrash = null; // один раз
   console.log('[launcher] уведомление: прошлый запуск завершился аварийно');
   let when = '';
-  try { when = new Date(m.startedAt).toLocaleString(launcher.UI_LANG === 'ru' ? 'ru-RU' : 'en-US'); } catch { /* noop */ }
+  try { when = new Date(m.startedAt).toLocaleString(state.UI_LANG === 'ru' ? 'ru-RU' : 'en-US'); } catch { /* noop */ }
   launcher.showToast(launcher.toastPageUrl({
     title: tr('В прошлый раз лаунчер завершился аварийно', 'The launcher closed unexpectedly last time'),
     sub: when ? tr(`запуск от ${when}`, `started ${when}`) : '',
@@ -98,7 +98,7 @@ async function reportFacts() {
     [tr('сессия', 'session'), process.env.XDG_SESSION_TYPE],
     [tr('режим окна', 'window mode'), app.commandLine.getSwitchValue('ozone-platform') || 'x11'],
     [tr('GPU-ускорение', 'GPU acceleration'), launcher.gpuStatusText(launcher.gpuStatusNow())],
-    [tr('язык окна', 'window language'), launcher.UI_LANG],
+    [tr('язык окна', 'window language'), state.UI_LANG],
     [tr('путь к dsh', 'path to dsh'), state.dshBin],
     [tr('аргументы dsh', 'dsh arguments'), DSH_ARGS.join(' ')],
     [tr('рабочая папка', 'working folder'), CWD],

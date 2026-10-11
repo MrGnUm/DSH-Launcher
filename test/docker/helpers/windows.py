@@ -222,6 +222,12 @@ class SettingsDialog(Dialog):
         """Изменить поле (как это делает само окно при изменении поля)."""
         self.go(f'dshlauncher://settings/set/?k={key}&v={value}')
 
+    def active_section(self):
+        """Какой раздел выбран в меню слева (и его содержимое показано)."""
+        return self.drv.eval("(() => { const a = document.querySelector('.sett nav a.on');"
+                             " return a && !document.getElementById('sec-' + a.dataset.s).hidden ? a.dataset.s : null; })()",
+                             page=self.TITLE)
+
     def section(self, sid):
         """Раздел в меню слева: general, updates, dsh, window, graphics."""
         self.drv.eval(f"sec({json.dumps(sid)})", page=self.TITLE)

@@ -42,7 +42,7 @@ async function maybeShowWhatsNew() {
   const scheme = process.execPath.startsWith('/opt/dsh-launcher/') ? 'deb' : 'semver';
   if (!shouldShowWhatsNew(last, current, scheme)) { saveLastVersion(current); return; }
   if (launcher.NO_UPDATE_CHECK) { saveLastVersion(current); return; } // в сеть ходить нельзя — молча
-  let latest = await launcher.updateChecks.launcher;
+  let latest = await state.updateChecks.launcher;
   // Список релизов из кэша (до часа) мог быть получен до выхода этой версии
   // (например, пакет поставили через apt) — тогда её описания в нём нет:
   // запросить заново, мимо кэша.

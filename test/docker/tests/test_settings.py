@@ -73,6 +73,7 @@ def test_settings_validation(start, gui):
     launcher = start(FAKE, NOUPD)
     gui.wait()
     settings = gui.open_settings()
+    assert settings.active_section() == 'general', 'окно открывается на разделе «Общие»'
 
     settings.set('port', '80')
     settings.wait_note('The port must be a number from 1024 to 65535')

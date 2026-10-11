@@ -1,0 +1,214 @@
+'use strict';
+// Плагин маркета (dshmarket): вопрос и установка.
+const { app } = require('electron');
+const { spawn } = require('child_process');
+const util = require('util');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const state = require('./state');
+const i18n = require('./i18n');
+const { tr } = i18n;
+const { esc, profileFromArgs } = require('./util');
+const { envWithBinDir } = require('./system');
+const { DSH_ARGS, CWD } = require('./env');
+const { dshEnv, findBin, npmInstallInfo } = require('./dsh-install');
+const launcher = require('./launcher'); // общий реестр (наполняет main.js)
+
+/* ---------------- плагин маркета (dshmarket) ----------------
+ * Перед тем как лаунчер сам запускает dsh, проверяем, что в профиле стоит
+ * плагин маркета. Если нет — спрашиваем пользователя: «Установить»
+ * (dsh plugin --profile <профиль> add dshmarket, с живым логом), «Не сейчас»
+ * или «Не спрашивать больше» (запоминается в userData/market-prompt.json).
+ * Ставим именно до старта: плагины dsh подхватывает при запуске. К уже
+ * запущенному dsh (режим подключения) вопрос не задаём.
+ * Проверка — чтение $DSH_HOME/profiles/<профиль>/package.json (по умолчанию
+ * ~/.dsh), без запуска dsh.
+ */
+const MARKET_PKG = 'dshmarket';
+
+
+const DSH_PROFILE = profileFromArgs(DSH_ARGS);
+
+/* ===== marketInPkg (чистая функция, тест test/parsing.js) =====
+   Есть ли плагин маркета в package.json профиля: в dependencies или в
+   dsh.profile.bundles. */
+function marketInPkg(pkg) {
+  const bundles = (pkg.dsh && pkg.dsh.profile && pkg.dsh.profile.bundles) || [];
+  return Boolean(pkg.dependencies && pkg.dependencies[MARKET_PKG]) || bundles.includes(MARKET_PKG);
+}
+/* ===== end marketInPkg ===== */
+
+function marketInstalled() {
+  if (!DSH_PROFILE) return true; // профиль не задан — не знаем, где смотреть, не спрашиваем
+  try {
+    const dshHome = process.env.DSH_HOME || path.join(os.homedir(), '.dsh');
+    const pkgFile = path.join(dshHome, 'profiles', DSH_PROFILE, 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgFile, 'utf8'));
+    return marketInPkg(pkg);
+  } catch {
+    return false; // профиля ещё нет — dsh plugin add создаст его сам
+  }
+}
+
+const marketPrefFile = () => path.join(app.getPath('userData'), 'market-prompt.json');
+
+function marketPromptDisabled() {
+  try { return JSON.parse(fs.readFileSync(marketPrefFile(), 'utf8')).dontAsk === true; }
+  catch { return false; }
+}
+
+let marketState = { resolve: null, running: false, log: [], timer: null, proc: null, cmdLine: null };
+
+function marketCommand() {
+  return `${state.dshBin} plugin --profile ${DSH_PROFILE} add ${MARKET_PKG}`;
+}
+
+function showMarketPage(note, noteIsError = false) {
+  state.currentPage = () => showMarketPage(note, noteIsError);
+  if (typeof note === 'function') note = note();
+  const installing = marketState.running;
+  const noteHtml = note
+    ? `<p style="color:${noteIsError ? '#f85149' : '#3fb950'}">${esc(note)}</p>`
+    : '';
+  const body = installing
+    ? `<p>${tr('Выполняю', 'Running')} <code>${esc(marketState.cmdLine || marketCommand())}</code></p>
+       <p>${tr('Последние строки установки:', 'Latest install output:')}</p>
+       <pre>${esc(marketState.log.slice(-40).join('\n') || '…')}</pre>`
+    : `${noteHtml}
+       <p>${tr(`В профиле <code>${esc(DSH_PROFILE)}</code> не найден плагин маркета
+          <code>${MARKET_PKG}</code>. Установить его перед запуском dsh?`,
+          `The marketplace plugin <code>${MARKET_PKG}</code> is not installed in the
+          <code>${esc(DSH_PROFILE)}</code> profile. Install it before starting dsh?`)}</p>
+       <pre>${esc(marketCommand())}</pre>
+       ${noteIsError && marketState.log.length ? `<pre>${esc(marketState.log.slice(-20).join('\n'))}</pre>` : ''}
+       <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap">
+         <button onclick="location.href='dshlauncher://market/install/'">${tr('Установить', 'Install')}</button>
+         <button onclick="location.href='dshlauncher://market/skip/'">${tr('Не сейчас', 'Not now')}</button>
+         <button onclick="location.href='dshlauncher://market/never/'">${tr('Не спрашивать больше', 'Don’t ask again')}</button>
+       </div>`;
+  launcher.showStatus(installing ? tr(`Устанавливаю ${MARKET_PKG}…`, `Installing ${MARKET_PKG}…`)
+    : tr(`Установить ${MARKET_PKG}?`, `Install ${MARKET_PKG}?`), body, noteIsError);
+}
+
+// Показывает вопрос и ждёт нажатия: 'install' | 'skip' | 'never'.
+function askMarket(note, noteIsError) {
+  return new Promise((resolve) => {
+    marketState.resolve = resolve;
+    showMarketPage(note, noteIsError);
+  });
+}
+
+function onMarketChoice(choice) {
+  const resolve = marketState.resolve;
+  if (resolve && !marketState.running) {
+    marketState.resolve = null;
+    resolve(choice);
+  }
+  return launcher.blankResponse();
+}
+
+// dsh plugin add вызывает pnpm — его каталог тоже должен быть в PATH.
+function marketEnv() {
+  const env = dshEnv();
+  const pnpm = findBin('pnpm');
+  if (pnpm) env.PATH = path.dirname(pnpm) + path.delimiter + env.PATH;
+  return env;
+}
+
+// Запуск шага установки (pnpm или сам маркет) с живым логом на странице.
+async function runMarketInstall(cmd, args, env) {
+  marketState.running = true;
+  marketState.log = [];
+  marketState.cmdLine = [cmd, ...args].join(' ');
+  console.log(`[launcher] установка: ${marketState.cmdLine}`);
+  try {
+    const p = spawn(cmd, args, { cwd: CWD, env, stdio: ['ignore', 'pipe', 'pipe'] });
+    marketState.proc = p;
+    const onData = (d) => {
+      for (const line of d.toString().split('\n')) {
+        const t = line.trim();
+        if (!t) continue;
+        marketState.log.push(t);
+        if (marketState.log.length > 500) marketState.log.shift();
+      }
+    };
+    p.stdout.on('data', onData);
+    p.stderr.on('data', onData);
+    showMarketPage();
+    marketState.timer = setInterval(() => showMarketPage(), 800);
+    return await new Promise((resolve) => {
+      let settled = false;
+      const done = (c) => { if (!settled) { settled = true; resolve(c); } };
+      p.on('close', (c) => done(c === null ? -1 : c));
+      p.on('error', (e) => { marketState.log.push(e.message); done(-1); });
+    });
+  } finally {
+    clearInterval(marketState.timer);
+    marketState.running = false;
+    marketState.proc = null;
+  }
+}
+
+async function offerMarketIfMissing() {
+  if (marketInstalled()) return;
+  if (marketPromptDisabled()) {
+    console.log(`[launcher] ${MARKET_PKG} не установлен, вопрос отключён (${marketPrefFile()})`);
+    return;
+  }
+  console.log(`[launcher] ${MARKET_PKG} не установлен в профиле ${DSH_PROFILE} — спрашиваю пользователя`);
+  let note = null;
+  let noteIsError = false;
+  for (;;) {
+    const choice = await askMarket(note, noteIsError);
+    if (state.stopping) return;
+    if (choice === 'never') {
+      try {
+        fs.mkdirSync(path.dirname(marketPrefFile()), { recursive: true });
+        fs.writeFileSync(marketPrefFile(), JSON.stringify({ dontAsk: true }));
+      } catch (e) { console.error('[launcher] market-prompt.json:', e.message); }
+      console.log('[launcher] пользователь отказался от маркета навсегда');
+      return;
+    }
+    if (choice !== 'install') {
+      console.log('[launcher] установка маркета отложена (не сейчас)');
+      return;
+    }
+    // dsh plugin add требует pnpm: на чистой системе его нет (код 127).
+    if (!findBin('pnpm')) {
+      const npmInfo = await npmInstallInfo();
+      if (state.stopping) return;
+      if (!npmInfo.canAuto) {
+        const cmd = npmInfo.hasNpm ? 'sudo npm install -g pnpm' : 'npm install -g pnpm';
+        console.log(`[launcher] pnpm нет, поставить сами не можем — прошу «${cmd}»`);
+        marketState.log = [];
+        note = () => tr(`Для плагинов dsh нужен pnpm, а его в системе нет. Выполните в терминале «${cmd}» и нажмите «Установить» ещё раз.`,
+          `dsh plugins need pnpm, which is not installed. Run “${cmd}” in a terminal and click “Install” again.`);
+        noteIsError = true;
+        continue;
+      }
+      console.log('[launcher] pnpm нет — ставлю через npm');
+      const pc = await runMarketInstall(npmInfo.npm, ['install', '-g', 'pnpm'], envWithBinDir(npmInfo.npm));
+      if (state.stopping) return;
+      if (pc !== 0 || !findBin('pnpm')) {
+        console.error(`[launcher] установка pnpm не удалась (код ${pc})`);
+        note = () => tr(`Не удалось установить pnpm (код ${pc}). Можно повторить или продолжить без маркета.`,
+          `Failed to install pnpm (code ${pc}). You can retry or continue without the marketplace.`);
+        noteIsError = true;
+        continue;
+      }
+    }
+    const code = await runMarketInstall(state.dshBin, ['plugin', '--profile', DSH_PROFILE, 'add', MARKET_PKG], marketEnv());
+    if (state.stopping) return;
+    if (code === 0 && marketInstalled()) {
+      console.log(`[launcher] ${MARKET_PKG} установлен`);
+      return;
+    }
+    console.error(`[launcher] установка ${MARKET_PKG} не удалась (код ${code})`);
+    note = () => tr(`Установка не удалась (код ${code}). Можно повторить или продолжить без маркета.`,
+      `Installation failed (code ${code}). You can retry or continue without the marketplace.`);
+    noteIsError = true;
+  }
+}
+
+module.exports = { marketState, onMarketChoice, offerMarketIfMissing };

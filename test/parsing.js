@@ -103,11 +103,15 @@ assert.strictEqual(proxyUrlFromRule('proxy p:1'), 'http://p:1', 'регистр 
   const firstChild = Math.min(...['execFileSync(', 'spawn(', 'execFileAsync(']
     .map((k) => mainSrc.indexOf(k, mainSrc.indexOf("require('child_process')") + 30)).filter((x) => x > 0));
   assert.ok(del < firstChild, 'токен убран из окружения до первого запуска дочернего процесса');
-  const uses = mainSrc.match(/Bearer \$\{GITHUB_TOKEN\}/g) || [];
+  // весь код лаунчера: main.js и модули src/
+  const srcDir = require('path').join(__dirname, '..', 'src');
+  const allSrc = [mainSrc, ...require('fs').readdirSync(srcDir).filter((f) => f.endsWith('.js'))
+    .map((f) => require('fs').readFileSync(require('path').join(srcDir, f), 'utf8'))].join('\n');
+  const uses = allSrc.match(/Bearer \$\{GITHUB_TOKEN\}/g) || [];
   assert.strictEqual(uses.length, 1, 'токен подставляется в одном месте');
-  const fn = mainSrc.slice(mainSrc.indexOf('async function githubReleases('), mainSrc.indexOf('async function fetchLauncherLatest('));
+  const fn = allSrc.slice(allSrc.indexOf('async function githubReleases('), allSrc.indexOf('async function fetchLauncherLatest('));
   assert.ok(fn.includes('Bearer ${GITHUB_TOKEN}'), '— и это запрос списка релизов (api.github.com)');
-  assert.ok(!/console\.(log|error)\([^)]*\$\{GITHUB_TOKEN\}/.test(mainSrc), 'значение токена не печатается');
+  assert.ok(!/console\.(log|error)\([^)]*\$\{GITHUB_TOKEN\}/.test(allSrc), 'значение токена не печатается');
 }
 
 // ---- dpkgStatusVersion: версия пакета из /var/lib/dpkg/status ----

@@ -24,6 +24,12 @@ module.exports = {
   lastReportPath: null, // (перенесено при разбиении main.js)
   dimKey: null, // (перенесено при разбиении main.js)
   UI_LANG: null, // (перенесено при разбиении main.js)
-  settingsSection: null, // (перенесено при разбиении main.js)
+  settingsSection: 'general', // раздел окна «Настройки» (меню слева)
   availableUpdates: {}, // (перенесено при разбиении main.js)
+  updateChecks: { launcher: null, dsh: null }, // проверки обновлений при запуске (промисы)
+  launcherUpdatedOnDisk: false, // (перенесено при разбиении main.js)
+  openContextMenu: null, // (перенесено при разбиении main.js)
+  findView: null, // (перенесено при разбиении main.js)
+  spellcheckOn: true, // (перенесено при разбиении main.js)
+  restartingDsh: false, // (перенесено при разбиении main.js)
 };

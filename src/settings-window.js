@@ -179,7 +179,7 @@ function showSettingsDialog() {
         <div class="row"><span>${tr('Язык интерфейса', 'Interface language')}</span>
           ${LANG_FORCED ? `<code>${state.UI_LANG}</code> <span class="hint">${tr('задано переменной', 'set by')} <code>DSH_LAUNCHER_LANG</code></span>`
             : sel('lang', langSetting(), [['auto', tr('Авто (как в системе)', 'Auto (system)')], ['ru', 'Русский'], ['en', 'English']])}</div>
-        <div class="row">${check('spellcheck', launcher.spellcheckOn, tr('Проверка орфографии в полях ввода', 'Spell check in text fields'))}</div>
+        <div class="row">${check('spellcheck', state.spellcheckOn, tr('Проверка орфографии в полях ввода', 'Spell check in text fields'))}</div>
           </section>
           <section id="sec-updates" class="form"${state.settingsSection === 'updates' ? '' : ' hidden'}>
         <div class="row">${check('checkUpdates', next.checkUpdates, tr('Проверять обновления при запуске (со следующего запуска)', 'Check for updates at startup (from the next start)'), next.src.checkUpdates === 'env')}

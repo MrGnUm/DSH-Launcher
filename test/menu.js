@@ -124,20 +124,22 @@ assert.ok(/win\.webContents\.on\('context-menu',\s*\(_e, params\) => showContext
 {
   const calls = [];
   const viewActions = new Proxy({}, { get: (_t, k) => () => calls.push('view.' + String(k)) });
+  // функции других частей лаунчера — через реестр launcher (заглушки)
   const mk = (tr, spellcheckOn = true, availableUpdates = {}) => extract('appMenuTemplate', {
     tr,
-    spellcheckOn,
-    state: { availableUpdates },
-    showUpdateNowDialog: (kind) => calls.push('update:' + kind),
-    viewActions,
-    showAboutDialog: () => calls.push('about'),
-    showUpdateCheckDialog: () => calls.push('check'),
-    openLogsFolder: () => calls.push('logs'),
-    saveReport: () => calls.push('report'),
-    restartDsh: () => calls.push('restart'),
-    setSpellcheck: (on) => calls.push('spell:' + on),
-    showLogDialog: () => calls.push('log'),
-    showSettingsDialog: () => calls.push('settings'),
+    state: { availableUpdates, spellcheckOn },
+    launcher: {
+      showUpdateNowDialog: (kind) => calls.push('update:' + kind),
+      viewActions,
+      showAboutDialog: () => calls.push('about'),
+      showUpdateCheckDialog: () => calls.push('check'),
+      openLogsFolder: () => calls.push('logs'),
+      saveReport: () => calls.push('report'),
+      restartDsh: () => calls.push('restart'),
+      setSpellcheck: (on) => calls.push('spell:' + on),
+      showLogDialog: () => calls.push('log'),
+      showSettingsDialog: () => calls.push('settings'),
+    },
   })();
   const ru = mk((r) => r);
   const en = mk((r, e) => e);

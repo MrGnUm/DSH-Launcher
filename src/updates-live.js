@@ -66,7 +66,7 @@ function setAvailableUpdates(found, notify) {
 // уведомления (о нём только что спросили).
 async function refreshAvailableUpdates() {
   if (launcher.NO_UPDATE_CHECK) return;
-  try { setAvailableUpdates(await findUpdates(launcher.updateChecks), false); }
+  try { setAvailableUpdates(await findUpdates(state.updateChecks), false); }
   catch (e) { console.error('[launcher] проверка обновлений:', e.message); }
 }
 
@@ -139,7 +139,7 @@ function updateToastUrl(kinds) {
 function placeToast() {
   if (!toastView || !state.win || state.win.isDestroyed()) return;
   const [cw] = state.win.getContentSize();
-  const y = 10 + (launcher.findView && launcher.findView.getVisible() ? launcher.FIND_H + 8 : 0);
+  const y = 10 + (state.findView && state.findView.getVisible() ? launcher.FIND_H + 8 : 0);
   toastView.setBounds({ x: Math.max(0, cw - TOAST_W - 18), y, width: Math.min(TOAST_W, cw), height: TOAST_H });
 }
 

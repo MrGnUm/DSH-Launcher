@@ -74,7 +74,7 @@ function startDsh() {
   const proc = state.dshProc;
   state.dshProc.on('exit', (code, signal) => {
     try { logStream.end(); } catch { /* noop */ }
-    if (proc !== state.dshProc || launcher.restartingDsh) { // остановлен «Перезапустить dsh» — это не сбой
+    if (proc !== state.dshProc || state.restartingDsh) { // остановлен «Перезапустить dsh» — это не сбой
       console.log('[launcher] прежний процесс dsh завершился (перезапуск):', { code, signal });
       return;
     }
