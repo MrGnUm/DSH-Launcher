@@ -8,17 +8,11 @@ const fs = require('fs');
 const path = require('path');
 const { extract, mainSrc } = require('./_extract');
 
-// Функции сравнения версий — из блока между маркерами «сравнение версий»
-const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-const a = src.indexOf('сравнение версий');
-const b = src.indexOf('/* ===== конец сравнения версий');
-const { compareDebianVer, compareSemVer, tagToPackageVersion } = new Function(
-  src.slice(src.lastIndexOf('\n', a), b) + ';return { compareDebianVer, compareSemVer, tagToPackageVersion };')();
+const { compareDebianVer, compareSemVer, tagToPackageVersion, notesBetween, shouldShowWhatsNew } = require('../src/versions');
+const { esc, redactLog } = require('../src/util');
+const { releaseNotesLang, mdToHtml } = require('../src/notes');
+const { releasesCacheMode: mode, releasesCacheFresh: fresh } = require('../src/updates-logic');
 
-const esc = extract('esc');
-const releaseNotesLang = extract('releaseNotesLang');
-const notesBetween = extract('notesBetween', { compareDebianVer, compareSemVer, tagToPackageVersion });
-const mdToHtml = extract('mdToHtml', { esc });
 
 // ---- releaseNotesLang: формат описания, который собирает build-deb.yml ----
 const body = `## Русский
@@ -95,7 +89,6 @@ assert.strictEqual(html, '<h4>Исправлено</h4><ul><li><b>Пакет с�
   'описание релиза → HTML');
 
 // ---- redactLog: токены и ключи в журнале dsh ----
-const redactLog = extract('redactLog');
 const log = [
   'dsh web: http://127.0.0.1:3080/?token=DviRWPYv5ugGXm7OJ2ag20onq_V12KvnZBKeeW858OI',
   '[dsh] dsh web: http://127.0.0.1:3080/?a=1&token=abc#x',
@@ -114,7 +107,6 @@ assert.strictEqual(redactLog('dsh: warning: 1 entry did not activate'), 'dsh: wa
 assert.strictEqual(redactLog(null), '', 'нет журнала');
 
 // ---- shouldShowWhatsNew: показать «Что нового» после обновления ----
-const shouldShowWhatsNew = extract('shouldShowWhatsNew', { compareDebianVer, compareSemVer });
 assert.strictEqual(shouldShowWhatsNew('1.5.1-1', '1.6.0-1', 'deb'), true, 'пакет обновился');
 assert.strictEqual(shouldShowWhatsNew('1.6.0-1', '1.6.0-1', 'deb'), false, 'та же версия');
 assert.strictEqual(shouldShowWhatsNew('1.6.0-1', '1.5.1-1', 'deb'), false, 'откат — не показываем');
@@ -124,10 +116,6 @@ assert.strictEqual(shouldShowWhatsNew('1.5.1', '1.6.0', 'semver'), true, 'сбо
 assert.strictEqual(shouldShowWhatsNew('1.5.1', null, 'semver'), false, 'версия неизвестна');
 
 // ---- releasesCacheMode: кэш списка релизов GitHub ----
-// releasesCacheFresh — в том же блоке, что releasesCacheMode
-const { mode, fresh } = new Function(
-  mainSrc.slice(mainSrc.indexOf('/* ===== releasesCacheMode '), mainSrc.indexOf('/* ===== end releasesCacheMode ===== */')) +
-  ';return { mode: releasesCacheMode, fresh: releasesCacheFresh };')();
 const H = 3600e3; const now = 1e12;
 const e = (o) => ({ list: [], etag: 'W/"x"', fetchedAt: now - 10 * 60e3, ...o });
 assert.strictEqual(mode(null, now, H, false), 'fetch', 'кэша нет → запрос');

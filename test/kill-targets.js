@@ -6,7 +6,7 @@
 const assert = require('assert');
 const { extract } = require('./_extract');
 
-const pick = extract('pickKillTargets');
+const { pickKillTargets: pick } = require('../src/system');
 const SELF = 100; // группа лаунчера
 
 // Порт пуст, старой группы нет — убивать нечего

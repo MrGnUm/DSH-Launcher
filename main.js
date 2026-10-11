@@ -31,6 +31,15 @@ const os = require('os');
 const path = require('path');
 
 const execFileAsync = promisify(execFile);
+const i18n = require('./src/i18n');
+const { tr } = i18n;
+const { splitArgs, firstErrLine, esc, profileFromArgs, timedCheck, launcherRoute, redactLog } = require('./src/util');
+const { envWithBinDir, writableOrCreatable, groupAlive, portListenerPid, pgidOf, pickKillTargets } = require('./src/system');
+const { compareDebianVer, compareSemVer, tagToPackageVersion, updateStatus, dpkgStatusVersion, shouldShowWhatsNew, notesBetween } = require('./src/versions');
+const { releaseNotesLang, mdToHtml } = require('./src/notes');
+const { DEFAULT_PORT, DEFAULT_PROFILE, effectiveConfig, settingValue, restartNeeded } = require('./src/config');
+const { releasesCacheMode, releasesCacheFresh, updatePollMs, announceUpdates, proxyUrlFromRule } = require('./src/updates-logic');
+const { WIN_DEFAULT, WIN_MIN, contextMenuItems, keyAction, windowSize, gpuStatus, reportFileName, reportInfoText } = require('./src/ui');
 
 // Только для разработки и тестов (CI): токен GitHub для запроса списка
 // релизов — лимит 5000 запросов в час вместо 60 без авторизации. Читаем и
@@ -45,32 +54,7 @@ delete process.env.DSH_LAUNCHER_UPDATE_NOW;
 
 // Разбор строки аргументов как в shell: пробелы разделяют, '…' и "…"
 // группируют, \ экранирует следующий символ (внутри '…' — нет).
-/* ===== splitArgs (чистая функция, тест test/parsing.js) ===== */
-function splitArgs(str) {
-  const out = [];
-  let cur = '';
-  let has = false; // был ли токен (в т.ч. пустой '' / "")
-  let quote = null;
-  for (let i = 0; i < str.length; i++) {
-    const c = str[i];
-    if (quote) {
-      if (c === quote) quote = null;
-      else if (c === '\\' && quote === '"' && i + 1 < str.length) cur += str[++i];
-      else cur += c;
-    } else if (c === "'" || c === '"') {
-      quote = c; has = true;
-    } else if (c === '\\' && i + 1 < str.length) {
-      cur += str[++i]; has = true;
-    } else if (/\s/.test(c)) {
-      if (has) { out.push(cur); cur = ''; has = false; }
-    } else {
-      cur += c; has = true;
-    }
-  }
-  if (has) out.push(cur);
-  return out;
-}
-/* ===== end splitArgs ===== */
+
 
 /* ========================= настройки ========================= */
 
@@ -86,70 +70,8 @@ function loadSettings() {
   catch { return {}; }
 }
 
-const DEFAULT_PORT = 3080;
-const DEFAULT_PROFILE = 'web';
 
-/* ===== effectiveConfig (чистая функция, тест test/settings.js) =====
-   Итоговые параметры из окружения (важнее) и settings.json; src[ключ] —
-   откуда взято: 'env' | 'settings' | 'default'. */
-function effectiveConfig(env, settings, home) {
-  const s = settings && typeof settings === 'object' ? settings : {};
-  const src = {};
-  const from = (key, where) => { src[key] = where; };
 
-  let port = DEFAULT_PORT;
-  if (env.DSH_PORT) { port = Number(env.DSH_PORT); from('port', 'env'); }
-  else if (Number.isInteger(s.port) && s.port >= 1 && s.port <= 65535) { port = s.port; from('port', 'settings'); }
-  else from('port', 'default');
-
-  let args;
-  let profile = DEFAULT_PROFILE;
-  if (env.DSH_ARGS) {
-    args = splitArgs(env.DSH_ARGS);
-    from('profile', 'env');
-  } else {
-    if (typeof s.profile === 'string' && /^[\w.-]+$/.test(s.profile)) { profile = s.profile; from('profile', 'settings'); }
-    else from('profile', 'default');
-    args = ['--profile', profile, '--no-open'];
-    if (port !== DEFAULT_PORT) args.push('--port', String(port)); // dsh слушает тот же порт, что ищет лаунчер
-  }
-
-  let dshBin = null; // null — искать автоматически
-  if (env.DSH_BIN) { dshBin = env.DSH_BIN; from('dshPath', 'env'); }
-  else if (typeof s.dshPath === 'string' && s.dshPath) { dshBin = s.dshPath; from('dshPath', 'settings'); }
-  else from('dshPath', 'default');
-
-  let cwd = home;
-  if (env.DSH_CWD) { cwd = env.DSH_CWD; from('cwd', 'env'); }
-  else if (typeof s.cwd === 'string' && s.cwd) { cwd = s.cwd; from('cwd', 'settings'); }
-  else from('cwd', 'default');
-
-  let noGpu = false;
-  if (env.DSH_LAUNCHER_NO_GPU === '1') { noGpu = true; from('gpu', 'env'); }
-  else if (s.gpu === 'off') { noGpu = true; from('gpu', 'settings'); }
-  else from('gpu', 'default');
-
-  let ozone = 'auto';
-  const envOzone = String(env.DSH_LAUNCHER_OZONE || '').toLowerCase();
-  if (envOzone === 'x11' || envOzone === 'wayland') { ozone = envOzone; from('ozone', 'env'); }
-  else if (s.ozone === 'x11' || s.ozone === 'wayland') { ozone = s.ozone; from('ozone', 'settings'); }
-  else from('ozone', 'default');
-
-  let checkUpdates = true;
-  if (/^(1|true|yes)$/i.test(env.DSH_LAUNCHER_NO_UPDATE_CHECK || '')) { checkUpdates = false; from('checkUpdates', 'env'); }
-  else if (s.checkUpdates === false) { checkUpdates = false; from('checkUpdates', 'settings'); }
-  else from('checkUpdates', 'default');
-
-  // проверка раз в 12 часов, пока лаунчер открыт — отдельная галочка;
-  // DSH_LAUNCHER_NO_UPDATE_CHECK запрещает любые проверки
-  let pollUpdates = true;
-  if (src.checkUpdates === 'env') { pollUpdates = false; from('pollUpdates', 'env'); }
-  else if (s.pollUpdates === false) { pollUpdates = false; from('pollUpdates', 'settings'); }
-  else from('pollUpdates', 'default');
-
-  return { port, args, profile, dshBin, cwd, noGpu, ozone, checkUpdates, pollUpdates, src };
-}
-/* ===== end effectiveConfig ===== */
 
 const CONFIG = effectiveConfig(process.env, loadSettings(), os.homedir());
 
@@ -266,7 +188,7 @@ const LANG_FORCED = (() => {
   return v === 'ru' || v === 'en' ? v : null;
 })();
 let UI_LANG = LANG_FORCED || (/^ru/i.test(process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || '') ? 'ru' : 'en');
-const tr = (ru, en) => (UI_LANG === 'ru' ? ru : en);
+i18n.setLang(UI_LANG);
 
 /* ============================================================== */
 
@@ -431,16 +353,7 @@ function dshEnv(extra) {
   return envWithBinDir(DSH_BIN, extra);
 }
 
-/* ===== firstErrLine (чистая функция, тест test/parsing.js) =====
-   Строка с самой ошибкой полезнее хвоста стектрейса («at …», «Node.js vX»):
-   первая строка с «error»/«ERR_», не начинающаяся с «at », иначе — последние
-   3 строки; в любом случае не длиннее 300 символов. */
-function firstErrLine(stderr) {
-  const lines = String(stderr || '').trim().split('\n').map((l) => l.trim()).filter(Boolean);
-  const errLine = lines.find((l) => !l.startsWith('at ') && /error|ERR_/i.test(l));
-  return (errLine || lines.slice(-3).join(' ')).slice(0, 300);
-}
-/* ===== end firstErrLine ===== */
+
 
 async function probeDsh(bin) {
   if (!bin || !fs.existsSync(bin)) return { ok: false, reason: 'missing' };
@@ -466,11 +379,7 @@ function nvmBinDirs() {
 }
 
 // Окружение с каталогом бинарника первым в PATH (для `#!/usr/bin/env node`-скриптов).
-/* ===== envWithBinDir (чистая функция, тест test/parsing.js) ===== */
-function envWithBinDir(bin, extra) {
-  return { ...process.env, PATH: path.dirname(bin) + path.delimiter + (process.env.PATH || ''), ...extra };
-}
-/* ===== end envWithBinDir ===== */
+
 
 // Исполняемый файл: рядом с dsh, в PATH, иначе в nvm (при запуске с ярлыка
 // nvm в PATH нет).
@@ -548,12 +457,7 @@ const INSTALL_CMD = 'npm install -g @deepseek-ai/dsh';
 // Право записи проверяем у ближайшего существующего каталога: на чистой
 // системе <prefix>/lib/node_modules ещё нет (появится при первой глобальной
 // установке), и ENOENT от него раньше ошибочно означал «npm нет».
-/* ===== writableOrCreatable (тест test/fs-helpers.js) ===== */
-function writableOrCreatable(dir) {
-  while (!fs.existsSync(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir);
-  try { fs.accessSync(dir, fs.constants.W_OK); return true; } catch { return false; }
-}
-/* ===== end writableOrCreatable ===== */
+
 
 // dsh нужен Node.js 22+. npm ставит его и на более старый Node без единого
 // предупреждения (Ubuntu 24.04: Node 18 из apt), а потом dsh не запускается.
@@ -666,13 +570,7 @@ function killGroup(pid, signal, groupOnly = false) {
   }
 }
 
-/* ===== groupAlive (тест test/pages.js) ===== */
-function groupAlive(pid, groupOnly = false) {
-  try { process.kill(-pid, 0); return true; } catch { /* noop */ }
-  if (groupOnly) return false;
-  try { process.kill(pid, 0); return true; } catch { return false; }
-}
-/* ===== end groupAlive ===== */
+
 
 // Главный процесс dsh завершился (по коду или по сигналу).
 function dshLeaderExited() {
@@ -697,49 +595,11 @@ async function stopDsh() {
 // pid процесса, слушающего порт (Linux, чистый fs — без fuser/ss):
 // inode сокетов LISTEN берём из /proc/net/tcp{,6}, затем ищем fd
 // socket:[inode] среди /proc/[pid]/fd/*.
-/* ===== portListenerPid ===== */
-function portListenerPid(port) {
-  const hexPort = port.toString(16).toUpperCase().padStart(4, '0');
-  const inodes = new Set();
-  for (const file of ['/proc/net/tcp', '/proc/net/tcp6']) {
-    let data;
-    try { data = fs.readFileSync(file, 'utf8'); } catch { continue; }
-    for (const line of data.split('\n').slice(1)) {
-      const c = line.trim().split(/\s+/);
-      // c[1]=local(IP:PORT), c[3]=state ('0A'=LISTEN), c[9]=inode
-      if (c.length < 10 || c[3] !== '0A') continue;
-      if (!c[1].endsWith(':' + hexPort)) continue;
-      inodes.add(c[9]);
-    }
-  }
-  if (inodes.size === 0) return null;
-  let pids;
-  try { pids = fs.readdirSync('/proc').filter((n) => /^\d+$/.test(n)); } catch { return null; }
-  for (const pid of pids) {
-    let fds;
-    try { fds = fs.readdirSync(`/proc/${pid}/fd`); } catch { continue; }
-    for (const fd of fds) {
-      let link;
-      try { link = fs.readlinkSync(`/proc/${pid}/fd/${fd}`); } catch { continue; }
-      const m = /^socket:\[(\d+)\]$/.exec(link);
-      if (m && inodes.has(m[1])) return Number(pid);
-    }
-  }
-  return null;
-}
-/* ===== end portListenerPid ===== */
+
 
 // pgid процесса: поле 5 из /proc/<pid>/stat (comm в скобках может содержать
 // пробелы — считаем от последней «)»).
-/* ===== pgidOf (тест test/fs-helpers.js) ===== */
-function pgidOf(pid) {
-  try {
-    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
-    const pgid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[2]);
-    return pgid > 0 ? pgid : null;
-  } catch { return null; }
-}
-/* ===== end pgidOf ===== */
+
 
 // Что убивать у «усыновлённого» dsh (после самовозрождения). Ручки на новый
 // процесс у нас нет, поэтому:
@@ -747,21 +607,7 @@ function pgidOf(pid) {
 //    группы, и тогда kill(-pid) не сработал бы, а потомки остались бы жить;
 //  - группа исходного dsh: в ней могли остаться его потомки (лидер мёртв —
 //    только группа, без запасного варианта по pid).
-/* ===== pickKillTargets (чистая функция, тест test/kill-targets.js) =====
-   portPid — процесс на порту (или null), portPgid — его группа (или null),
-   selfPgid — группа лаунчера, oldPgid — группа исходного dsh (или null). */
-function pickKillTargets(portPid, portPgid, selfPgid, oldPgid) {
-  const targets = [];
-  if (portPid) {
-    if (portPgid && portPgid !== selfPgid) targets.push({ id: portPgid, groupOnly: true });
-    else targets.push({ id: portPid, groupOnly: false }); // группа наша/неизвестна — только сам процесс
-  }
-  if (oldPgid && oldPgid !== selfPgid && !targets.some((t) => t.id === oldPgid)) {
-    targets.push({ id: oldPgid, groupOnly: true });
-  }
-  return targets;
-}
-/* ===== end pickKillTargets ===== */
+
 
 function adoptedTargets() {
   const pid = portListenerPid(PORT);
@@ -842,11 +688,7 @@ function retryButton() {
 
 /* ---------------- страницы-статусы ---------------- */
 
-/* ===== esc (чистая функция, тест test/parsing.js) ===== */
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
-/* ===== end esc ===== */
+
 
 const PAGE_CSS = `
   html,body{margin:0;height:100%;background:#0f1115;color:#d7dce3;
@@ -955,13 +797,13 @@ function loadLangPref() {
   if (LANG_FORCED) return;
   try {
     const v = JSON.parse(fs.readFileSync(langPrefFile(), 'utf8')).lang;
-    if (v === 'ru' || v === 'en') UI_LANG = v;
+    if (v === 'ru' || v === 'en') { UI_LANG = v; i18n.setLang(UI_LANG); }
   } catch { /* выбора ещё не было — остаётся язык локали */ }
 }
 
 function onLangSwitch(lang) {
   if ((lang === 'ru' || lang === 'en') && lang !== UI_LANG) {
-    UI_LANG = lang;
+    UI_LANG = lang; i18n.setLang(UI_LANG);
     try {
       fs.mkdirSync(path.dirname(langPrefFile()), { recursive: true });
       fs.writeFileSync(langPrefFile(), JSON.stringify({ lang }));
@@ -1105,15 +947,7 @@ async function showInstallPage(note, noteIsError = false) {
  */
 const MARKET_PKG = 'dshmarket';
 
-/* ===== profileFromArgs (чистая функция, тест test/parsing.js) ===== */
-function profileFromArgs(args) {
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--profile' && args[i + 1]) return args[i + 1];
-    if (args[i].startsWith('--profile=')) return args[i].slice('--profile='.length);
-  }
-  return null;
-}
-/* ===== end profileFromArgs ===== */
+
 const DSH_PROFILE = profileFromArgs(DSH_ARGS);
 
 /* ===== marketInPkg (чистая функция, тест test/parsing.js) =====
@@ -1338,100 +1172,13 @@ const UPDATE_GITHUB_REPO = 'Toximiner/DSH-Launcher';
 const UPDATE_CHECK_TIMEOUT = 8000; // сколько ждать проверки, прежде чем не спрашивать
 const NO_UPDATE_CHECK = !CONFIG.checkUpdates; // DSH_LAUNCHER_NO_UPDATE_CHECK или «Настройки»
 
-/* ===== сравнение версий (чистые функции, тест test/version.js) ===== */
-// Debian-версия (лаунчер): X.Y.Z[-R]. Числовые части сравниваются
-// попорядково; отсутствующая ревизия считается 0 (CI собирает релиз vX.Y.Z
-// в пакет X.Y.Z-1, поэтому тег с тем же upstream новее «голого» X.Y.Z).
-function parseDebianVer(s) {
-  const m = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:-(\d+))?$/.exec(String(s).trim());
-  if (!m) return null;
-  return {
-    upstream: [Number(m[1]), Number(m[2] || 0), Number(m[3] || 0)],
-    rev: m[4] === undefined ? 0 : Number(m[4]),
-  };
-}
-// semver (dsh): X.Y.Z[-prerelease]. Prerelease ниже релиза (0.2.0-rc.2 <
-// 0.2.0); prerelease сравниваются посегментно (0.2.0-rc.2 < 0.2.0-rc.10),
-// числовой сегмент ниже буквенного (0.2.0-1 < 0.2.0-alpha).
-function parseSemVer(s) {
-  const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?/.exec(String(s).trim());
-  if (!m) return null;
-  return { upstream: [Number(m[1]), Number(m[2]), Number(m[3])], pre: m[4] || null };
-}
-function cmpUpstream(a, b) {
-  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] < b[i] ? -1 : 1;
-  return 0;
-}
-function compareDebianVer(a, b) {
-  const pa = parseDebianVer(a);
-  const pb = parseDebianVer(b);
-  if (!pa || !pb) return 0; // не распознано — обновление не предлагаем
-  const c = cmpUpstream(pa.upstream, pb.upstream);
-  if (c !== 0) return c;
-  return pa.rev === pb.rev ? 0 : pa.rev < pb.rev ? -1 : 1;
-}
-function compareSemVer(a, b) {
-  const pa = parseSemVer(a);
-  const pb = parseSemVer(b);
-  if (!pa || !pb) return 0;
-  const c = cmpUpstream(pa.upstream, pb.upstream);
-  if (c !== 0) return c;
-  if (pa.pre === pb.pre) return 0;
-  if (pa.pre === null) return 1; // релиз > prerelease
-  if (pb.pre === null) return -1;
-  const sa = pa.pre.split('.');
-  const sb = pb.pre.split('.');
-  for (let i = 0; i < Math.max(sa.length, sb.length); i++) {
-    const x = sa[i];
-    const y = sb[i];
-    if (x === undefined) return -1;
-    if (y === undefined) return 1;
-    const xn = /^\d+$/.test(x);
-    const yn = /^\d+$/.test(y);
-    if (xn && yn) { if (x !== y) return Number(x) < Number(y) ? -1 : 1; continue; }
-    if (xn !== yn) return xn ? -1 : 1;
-    if (x !== y) return x < y ? -1 : 1;
-  }
-  return 0;
-}
-// GitHub-тег → версия пакета (правило CI: vX.Y.Z → X.Y.Z-1, vX.Y.Z-R → X.Y.Z-R)
-function tagToPackageVersion(tag) {
-  const t = String(tag).replace(/^v/, '').trim();
-  return t.includes('-') ? t : t + '-1';
-}
-/* ===== конец сравнения версий ===== */
 
-/* ===== updateStatus (чистая функция, тест test/version.js) =====
-   Итог проверки обновлений для одного компонента: 'nocheck' (нет ответа
-   сервера), 'notinstalled' (установленная версия неизвестна), 'uptodate',
-   'available'. scheme: 'semver' — npm и сборка лаунчера из исходников
-   (package.json, без ревизии), 'deb' — пакет лаунчера (тег vX.Y.Z → X.Y.Z-1). */
-function updateStatus(latest, installed, scheme) {
-  if (!latest) return 'nocheck';
-  if (!installed) return 'notinstalled';
-  const cmp = scheme === 'deb'
-    ? compareDebianVer(tagToPackageVersion(latest), installed)
-    : compareSemVer(latest, installed);
-  return cmp <= 0 ? 'uptodate' : 'available';
-}
-/* ===== end updateStatus ===== */
+
+
 
 // Установленная версия лаунчера через dpkg (пакет .deb dsh-launcher).
 // null — не установлен через .deb (запуск из исходников) → не проверяем.
-/* ===== dpkgStatusVersion (чистая функция, тест test/parsing.js) =====
-   Версия установленного пакета из базы dpkg (/var/lib/dpkg/status): запись
-   «Package: <pkg>» со «Status: … installed» → её «Version:», иначе null. */
-function dpkgStatusVersion(text, pkg) {
-  for (const block of String(text || '').split(/\n(?=Package: )/)) {
-    const name = /^Package: (\S+)/m.exec(block);
-    if (!name || name[1] !== pkg) continue;
-    if (!/^Status: .* installed$/m.test(block)) continue;
-    const ver = /^Version: (\S+)/m.exec(block);
-    if (ver) return ver[1];
-  }
-  return null;
-}
-/* ===== end dpkgStatusVersion ===== */
+
 
 // Версия пакета лаунчера — из базы dpkg, без запуска dpkg-query: запуск
 // дочернего процесса во время загрузки окна-диалога ронял Electron 44
@@ -1448,17 +1195,7 @@ async function launcherInstalledVersion() {
 
 // Проверка с дедлайном: по истечении ms возвращает null — медленная сеть
 // не должна держать окно на вопросе, а вопрос — не держать старт.
-/* ===== timedCheck (тест test/pages.js) ===== */
-function timedCheck(promise, ms) {
-  return new Promise((resolve) => {
-    const t = setTimeout(() => resolve(null), ms);
-    promise.then(
-      (v) => { clearTimeout(t); resolve(v); },
-      () => { clearTimeout(t); resolve(null); }
-    );
-  });
-}
-/* ===== end timedCheck ===== */
+
 
 // Внешние запросы (GitHub, npm, скачивание .deb) — через http/https из Node,
 // а не electronNet.fetch. После electronNet.fetch к внешним хостам при старте
@@ -1470,18 +1207,7 @@ function timedCheck(promise, ms) {
 // Проверка куки окна (plainUrlIsAuthed) остаётся на electronNet — ей нужна
 // сессия окна.
 
-/* ===== proxyUrlFromRule (чистая функция, тест test/parsing.js) =====
-   Правило Chromium («PROXY h:p; DIRECT», «HTTPS h:p», «SOCKS5 h:p», «DIRECT»)
-   → URL прокси для Node или null (напрямую). Берём первый HTTP(S)-прокси;
-   SOCKS агент Node не умеет — тогда напрямую. */
-function proxyUrlFromRule(rule) {
-  for (const part of String(rule || '').split(';')) {
-    const m = part.trim().match(/^(PROXY|HTTPS)\s+(\S+)$/i);
-    if (m) return (m[1].toUpperCase() === 'HTTPS' ? 'https://' : 'http://') + m[2];
-  }
-  return null;
-}
-/* ===== end proxyUrlFromRule ===== */
+
 
 async function proxyAgentFor(u) {
   let rule = 'DIRECT';
@@ -1521,26 +1247,7 @@ async function httpJson(url, headers, what) {
   return JSON.parse(body);
 }
 
-/* ===== releasesCacheMode (чистая функция, тест test/notes.js) =====
-   Как получить список релизов GitHub: 'revalidate' — спросить с
-   If-None-Match (есть метка ETag; ответ 304 «не изменилось» не расходует
-   лимит 60/ч — поэтому всегда, и новый релиз виден сразу), 'cache' —
-   взять запомненный без запроса (метки нет, а проверяли меньше maxAgeMs
-   назад; ручная проверка — force — так не делает), 'fetch' — обычный
-   запрос. */
-function releasesCacheMode(entry, now, maxAgeMs, force) {
-  const ok = entry && typeof entry === 'object' && Array.isArray(entry.list);
-  if (!ok) return 'fetch';
-  if (entry.etag) return 'revalidate';
-  if (!force && releasesCacheFresh(entry, now, maxAgeMs)) return 'cache';
-  return 'fetch';
-}
 
-// Кэш проверяли меньше maxAgeMs назад (время из будущего — часы сдвинули — нет).
-function releasesCacheFresh(entry, now, maxAgeMs) {
-  return Boolean(entry) && Number.isFinite(entry.fetchedAt) && now - entry.fetchedAt >= 0 && now - entry.fetchedAt < maxAgeMs;
-}
-/* ===== end releasesCacheMode ===== */
 
 // Кэш списка релизов: без метки ETag — не спрашивать GitHub чаще раза в час;
 // GitHub не ответил — список из кэша, если он не старше часа.
@@ -1611,71 +1318,11 @@ async function fetchLauncherLatest({ force = false } = {}) {
   return meta;
 }
 
-/* ===== releaseNotesLang (чистая функция, тест test/notes.js) =====
-   Описание релиза (собирается из CHANGELOG: «## Русский … --- ## English …
-   **Full Changelog**: …») → часть на языке окна. Нет разметки языков —
-   всё описание; строка «Full Changelog» отбрасывается. */
-function releaseNotesLang(body, lang) {
-  const text = String(body || '').replace(/\r\n/g, '\n');
-  const ru = text.match(/^##\s*Русский\s*$([\s\S]*?)(?=^---\s*$|^##\s*English\s*$|$(?![\s\S]))/m);
-  const en = text.match(/^##\s*English\s*$([\s\S]*)/m);
-  let part = text;
-  if (lang === 'ru' && ru) part = ru[1];
-  else if (lang !== 'ru' && en) part = en[1];
-  else if (ru) part = ru[1];
-  return part.replace(/^\*\*Full Changelog\*\*.*$/gm, '').replace(/^---\s*$/gm, '').trim();
-}
-/* ===== end releaseNotesLang ===== */
 
-/* ===== notesBetween (чистая функция, тест test/notes.js) =====
-   Релизы новее установленной версии и не новее предлагаемой — новые
-   сверху. scheme — как в updateStatus: 'deb' (пакет: 1.5.1-1) или
-   'semver' (сборка из исходников: 1.5.1). Установленная неизвестна —
-   только предлагаемая версия. */
-function notesBetween(releases, installed, latest, scheme) {
-  const key = (v) => (scheme === 'deb' ? tagToPackageVersion(v) : String(v).replace(/^v/, ''));
-  const cmp = (a, b) => (scheme === 'deb' ? compareDebianVer(a, b) : compareSemVer(a, b));
-  const top = key(latest);
-  return (releases || [])
-    .filter((r) => r && r.version && cmp(key(r.version), top) <= 0 &&
-      (installed ? cmp(key(r.version), installed) > 0 : cmp(key(r.version), top) === 0))
-    .sort((a, b) => cmp(key(b.version), key(a.version)));
-}
-/* ===== end notesBetween ===== */
 
-/* ===== mdToHtml (чистая функция, тест test/notes.js) =====
-   Маленький markdown для описаний релизов: заголовки (##, ###), списки «- »
-   (с переносом строк внутри пункта), абзацы, **жирный**, `код`, ссылки
-   [текст](https://…). Текст из сети: сначала всё экранируется, HTML из
-   описания в страницу не попадает; ссылки — только http(s). */
-function mdToHtml(md) {
-  const inline = (t) => esc(t)
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
-    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, t2, u) => `<a href="${u}" target="_blank">${t2}</a>`);
-  const out = [];
-  let list = null;  // пункты текущего списка
-  let para = null;  // строки текущего абзаца
-  const flush = () => {
-    if (list) { out.push('<ul>' + list.map((li) => `<li>${inline(li)}</li>`).join('') + '</ul>'); list = null; }
-    if (para) { out.push(`<p>${inline(para.join(' '))}</p>`); para = null; }
-  };
-  for (const raw of String(md || '').split('\n')) {
-    const line = raw.replace(/\s+$/, '');
-    const h = line.match(/^#{2,4}\s+(.*)$/);
-    const li = line.match(/^\s*[-*]\s+(.*)$/);
-    if (!line.trim()) { flush(); continue; }
-    if (h) { flush(); out.push(`<h4>${inline(h[1])}</h4>`); continue; }
-    if (li) { if (para) flush(); list = list || []; list.push(li[1]); continue; }
-    if (list && /^\s+\S/.test(raw)) { list[list.length - 1] += ' ' + line.trim(); continue; } // перенос внутри пункта
-    if (list) flush();
-    para = para || [];
-    para.push(line.trim());
-  }
-  flush();
-  return out.join('');
-}
-/* ===== end mdToHtml ===== */
+
+
+
 
 // Блок «Что нового» — версии от новой к старой; пусто — ''.
 function notesBlockHtml(items) {
@@ -2339,49 +1986,7 @@ function buildAppMenu() {
   if (tray) tray.setContextMenu(trayMenu());
 }
 
-/* ===== contextMenuItems (чистая функция, тест test/menu.js) =====
-   Контекстное меню по правому клику — по params события context-menu:
-   в поле ввода — Вырезать / Копировать / Вставить / Выделить всё (доступность
-   по editFlags); вне поля — Копировать (если есть выделение) и Выделить всё;
-   на ссылке — ещё «Копировать адрес ссылки»; на слове с ошибкой — первой
-   группой варианты исправления и «Добавить в словарь». Пункты — { action,
-   label, enabled[, value] }, группы разделены { type: 'separator' }. */
-function contextMenuItems(params) {
-  const f = params.editFlags || {};
-  const groups = [];
-  if (params.misspelledWord) {
-    const sugg = (params.dictionarySuggestions || []).slice(0, 5);
-    groups.push([
-      ...(sugg.length
-        ? sugg.map((w) => ({ action: 'replace', label: w, value: w, enabled: true }))
-        : [{ action: 'none', label: tr('Нет вариантов', 'No suggestions'), enabled: false }]),
-      { action: 'addWord', label: tr('Добавить в словарь', 'Add to dictionary'), enabled: true },
-    ]);
-  }
-  if (params.linkURL) {
-    groups.push([{ action: 'copyLink', label: tr('Копировать адрес ссылки', 'Copy link address'), enabled: true }]);
-  }
-  if (params.isEditable) {
-    groups.push([
-      { action: 'cut', label: tr('Вырезать', 'Cut'), enabled: Boolean(f.canCut) },
-      { action: 'copy', label: tr('Копировать', 'Copy'), enabled: Boolean(f.canCopy) },
-      { action: 'paste', label: tr('Вставить', 'Paste'), enabled: Boolean(f.canPaste) },
-    ]);
-    groups.push([{ action: 'selectAll', label: tr('Выделить всё', 'Select all'), enabled: Boolean(f.canSelectAll) }]);
-  } else {
-    if (String(params.selectionText || '').trim()) {
-      groups.push([{ action: 'copy', label: tr('Копировать', 'Copy'), enabled: true }]);
-    }
-    groups.push([{ action: 'selectAll', label: tr('Выделить всё', 'Select all'), enabled: true }]);
-  }
-  const items = [];
-  for (const g of groups) {
-    if (items.length) items.push({ type: 'separator' });
-    items.push(...g);
-  }
-  return items;
-}
-/* ===== end contextMenuItems ===== */
+
 
 // Открытое контекстное меню — закрыть его по маршруту /menu/close-context/
 // (Docker-сценарии: события CDP идут в страницу мимо нативного меню, и само
@@ -2457,32 +2062,13 @@ async function dshVersionRaw() {
 
 // Запоминаем размер и «развёрнуто» (позицию не трогаем: на Wayland её
 // выбирает композитор). Полноэкранный режим не сохраняем.
-const WIN_DEFAULT = { width: 1440, height: 900 };
-const WIN_MIN = { width: 760, height: 480 };
 const windowStateFile = () => path.join(app.getPath('userData'), 'window-state.json');
 
 function loadWindowState() {
   try { return JSON.parse(fs.readFileSync(windowStateFile(), 'utf8')); } catch { return null; }
 }
 
-/* ===== windowSize (чистая функция, тест test/menu.js) =====
-   Размер окна из сохранённого состояния: не меньше WIN_MIN и не больше
-   рабочей области экрана (монитор могли сменить); мусор — размер по умолчанию. */
-function windowSize(saved, workArea) {
-  const num = (v) => (Number.isFinite(v) && v > 0 ? v : null);
-  const fit = (v, def, min, max) => {
-    const x = num(v) || def;
-    return Math.round(Math.max(min, num(max) ? Math.min(x, max) : x));
-  };
-  const st = saved && typeof saved === 'object' ? saved : {};
-  const wa = workArea || {};
-  return {
-    width: fit(st.width, WIN_DEFAULT.width, WIN_MIN.width, wa.width),
-    height: fit(st.height, WIN_DEFAULT.height, WIN_MIN.height, wa.height),
-    maximized: st.maximized === true,
-  };
-}
-/* ===== end windowSize ===== */
+
 
 function trackWindowState(w) {
   // Последнее известное состояние — в памяти: при закрытии из страницы
@@ -2542,22 +2128,7 @@ const viewActions = {
   settings: () => showSettingsDialog(),
 };
 
-/* ===== keyAction (чистая функция, тест test/menu.js) =====
-   Клавиша → действие «Вида» (имя из viewActions) или null — клавиша
-   странице. code — физическая клавиша, не зависит от раскладки (RU/EN). */
-function keyAction(input) {
-  const c = input.control;
-  if (input.key === 'F5' || (c && input.code === 'KeyR')) return input.shift ? 'reloadHard' : 'reload';
-  if (c && (input.code === 'Equal' || input.code === 'NumpadAdd')) return 'zoomIn';
-  if (c && (input.code === 'Minus' || input.code === 'NumpadSubtract')) return 'zoomOut';
-  if (c && (input.code === 'Digit0' || input.code === 'Numpad0')) return 'zoomReset';
-  if (c && !input.shift && input.code === 'KeyF') return 'find';
-  if (input.key === 'F3') return input.shift ? 'findPrev' : 'findNext';
-  if (input.key === 'F11') return 'fullscreen';
-  if (c && input.code === 'Comma') return 'settings';
-  return null;
-}
-/* ===== end keyAction ===== */
+
 
 // Поиск по странице (Ctrl+F): панель в правом верхнем углу окна — отдельный
 // WebContentsView поверх страницы (не окно: на Wayland его не поставить в
@@ -2735,21 +2306,7 @@ async function restartDsh({ confirm = true } = {}) {
   await launchDshInner();
 }
 
-/* ===== gpuStatus (чистая функция, тест test/menu.js) =====
-   Состояние GPU-ускорения для «О программе». Причины отключения — как в
-   начале main.js; markerAgeMs — возраст маркера сбоев сейчас (null — нет).
-   Маркер при включённом GPU = отключится со следующего запуска. */
-function gpuStatus(st) {
-  const marker = st.markerAgeMs !== null && st.markerAgeMs < st.ttlMs;
-  const daysLeft = marker ? Math.max(1, Math.ceil((st.ttlMs - st.markerAgeMs) / 86400000)) : 0;
-  const reason = st.noGpuRequested ? (st.noGpuBySettings ? 'setting' : 'env')
-    : st.disabledByMarker ? 'marker'
-    : !st.hasRenderNode ? 'norender'
-    : !st.hasEgl ? 'noegl'
-    : null;
-  return { on: reason === null, reason, marker, daysLeft };
-}
-/* ===== end gpuStatus ===== */
+
 
 function gpuStatusNow() {
   let markerAgeMs = null;
@@ -2790,17 +2347,7 @@ function onDialogGpuEnable() {
 // входа в GUI («dsh web: …?token=…») — его и похожее на ключи при показе и
 // копировании заменяем на ***.
 
-/* ===== redactLog (чистая функция, тест test/notes.js) ===== */
-function redactLog(text) {
-  return String(text || '')
-    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '') // ANSI-цвета
-    .replace(/([?&](?:token|access_token|key|api_key)=)[^\s&#"'<>]+/gi, '$1***')
-    .replace(/(\bBearer\s+)[A-Za-z0-9._~+/=-]{8,}/g, '$1***')
-    .replace(/\b(sk|pk|rk)-[A-Za-z0-9_-]{16,}/g, '$1-***')
-    .replace(/\b(gh[pousr]_)[A-Za-z0-9]{20,}/g, '$1***')
-    .replace(/((?:api[_-]?key|apikey|secret|password|passwd|access[_-]?token|auth[_-]?token)["']?\s*[:=]\s*["']?)[^\s"'&,;]+/gi, '$1***');
-}
-/* ===== end redactLog ===== */
+
 
 // Последние строки файла (читаем только хвост — лог бывает большим).
 function logTail(file, maxLines = 300, maxBytes = 256 * 1024) {
@@ -2851,12 +2398,7 @@ function showLogDialog() {
 const lastVersionFile = () => path.join(app.getPath('userData'), 'last-version.json');
 let whatsNewChecked = false;
 
-/* ===== shouldShowWhatsNew (чистая функция, тест test/notes.js) ===== */
-function shouldShowWhatsNew(last, current, scheme) {
-  if (!last || !current) return false;
-  return (scheme === 'deb' ? compareDebianVer(current, last) : compareSemVer(current, last)) > 0;
-}
-/* ===== end shouldShowWhatsNew ===== */
+
 
 function saveLastVersion(v) {
   // подставная «установленная» версия (разработка/тесты) — не настоящая:
@@ -2910,50 +2452,7 @@ async function maybeShowWhatsNew() {
 // «снова спрашивать» действуют сразу, проверка обновлений — со следующего
 // запуска, остальное — после перезапуска лаунчера (кнопка в окне).
 
-/* ===== settingValue (чистая функция, тест test/settings.js) =====
-   Значение поля окна → { value } или { error } (сообщение для окна). */
-function settingValue(key, raw) {
-  const v = String(raw === undefined || raw === null ? '' : raw).trim();
-  const abs = (x) => x === '' || x.startsWith('/');
-  switch (key) {
-    case 'port': {
-      const n = Number(v);
-      if (!/^\d+$/.test(v) || n < 1024 || n > 65535) return { error: tr('Порт — число от 1024 до 65535.', 'The port must be a number from 1024 to 65535.') };
-      return { value: n };
-    }
-    case 'profile':
-      if (!/^[\w.-]+$/.test(v)) return { error: tr('Профиль — латинские буквы, цифры, «.», «_», «-».', 'The profile may contain Latin letters, digits, “.”, “_”, “-”.') };
-      return { value: v };
-    case 'dshPath':
-    case 'cwd':
-      if (!abs(v)) return { error: tr('Нужен полный путь (начинается с /).', 'A full path is needed (starting with /).') };
-      return { value: v };
-    case 'checkUpdates':
-    case 'pollUpdates':
-    case 'closeToTray':
-    case 'attention':
-    case 'attentionSound':
-    case 'spellcheck':
-      if (v !== 'true' && v !== 'false') return { error: 'bad value' };
-      return { value: v === 'true' };
-    case 'lang':
-      return ['auto', 'ru', 'en'].includes(v) ? { value: v } : { error: 'bad value' };
-    case 'gpu':
-      return ['auto', 'off'].includes(v) ? { value: v } : { error: 'bad value' };
-    case 'ozone':
-      return ['auto', 'wayland', 'x11'].includes(v) ? { value: v } : { error: 'bad value' };
-    default:
-      return { error: `unknown setting ${key}` };
-  }
-}
 
-/* Какие из действующих параметров изменятся после перезапуска лаунчера. */
-function restartNeeded(running, next) {
-  const changed = ['port', 'dshBin', 'cwd', 'noGpu', 'ozone'].filter((k) => running[k] !== next[k]);
-  if (JSON.stringify(running.args) !== JSON.stringify(next.args)) changed.push('args');
-  return changed;
-}
-/* ===== end settingValue ===== */
 
 function saveSettings(patch) {
   const next = { ...loadSettings(), ...patch };
@@ -2966,7 +2465,7 @@ function saveSettings(patch) {
 function setLanguage(lang) {
   if (lang === 'auto') {
     try { fs.rmSync(langPrefFile(), { force: true }); } catch { /* noop */ }
-    UI_LANG = /^ru/i.test(process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || '') ? 'ru' : 'en';
+    UI_LANG = /^ru/i.test(process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || '') ? 'ru' : 'en'; i18n.setLang(UI_LANG);
     buildAppMenu();
     if (currentPage) currentPage();
   } else {
@@ -3377,32 +2876,7 @@ async function showUpdateCheckDialog() {
   });
 }
 
-/* ===== announceUpdates (чистые функции, тест test/updates.js) =====
-   updatePollMs — интервал периодической проверки: 12 часов
-   (DSH_LAUNCHER_UPDATE_POLL_SEC — для тестов). announceUpdates — что
-   показать по найденным обновлениям: found — { launcher, dsh } (новые
-   версии или null), dismissed — update-prefs.json («не спрашивать больше»
-   по версиям), notified — о каких версиях уже уведомляли в этом сеансе.
-   → { menu: { kind: версия } — пункты «Обновить … до X…» в «Справке»,
-       notify: [kind] — системные уведомления (раз на версию; не для
-       отклонённой — пункт меню для неё всё же есть) }. */
-function updatePollMs(env) {
-  const sec = Number(env.DSH_LAUNCHER_UPDATE_POLL_SEC);
-  return Number.isFinite(sec) && sec >= 1 ? Math.round(sec * 1000) : 12 * 3600 * 1000;
-}
 
-function announceUpdates(found, dismissed, notified) {
-  const menu = {};
-  const notify = [];
-  for (const kind of ['launcher', 'dsh']) {
-    const v = found && found[kind];
-    if (!v) continue;
-    menu[kind] = v;
-    if ((dismissed || {})[kind] !== v && (notified || {})[kind] !== v) notify.push(kind);
-  }
-  return { menu, notify };
-}
-/* ===== end announceUpdates ===== */
 
 /* ---------------- обновления во время работы ---------------- */
 
@@ -3602,17 +3076,7 @@ function updateNow(kind) {
   relaunchLauncher(`чтобы обновить ${updateName(kind)} до ${availableUpdates[kind].version}`);
 }
 
-/* ===== reportFileName (чистые функции, тест test/report.js) =====
-   Имя файла отчёта (по местному времени) и текст сведений «ключ: значение». */
-function reportFileName(d) {
-  const p = (n) => String(n).padStart(2, '0');
-  return `dsh-launcher-report-${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}.tar.gz`;
-}
 
-function reportInfoText(facts) {
-  return facts.map(([k, v]) => `${k}: ${v === undefined || v === null || v === '' ? '—' : v}`).join('\n') + '\n';
-}
-/* ===== end reportFileName ===== */
 
 /* ---------------- прошлый запуск: завершился ли штатно ---------------- */
 
@@ -4061,12 +3525,7 @@ function startWatchdog() {
 // Маршрут запроса dshlauncher://…: у нестандартной схемы первый сегмент
 // (retry, install, paste, market) URL-парсер кладёт в host, а не в pathname —
 // склеиваем обратно: dshlauncher://install/run/ -> '/install/run/'.
-/* ===== launcherRoute (чистая функция, тест test/parsing.js) ===== */
-function launcherRoute(url) {
-  const u = new URL(url);
-  return '/' + u.host + u.pathname;
-}
-/* ===== end launcherRoute ===== */
+
 
 function onPasteRequest(request) {
   try {

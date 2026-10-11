@@ -1,8 +1,8 @@
 'use strict';
 /*
  * test/port.js — проверка portListenerPid (используется при остановке
- * «усыновлённого» dsh после самовозрождения). Функция извлекается из
- * main.js по маркерам, как в test/version.js. Запуск: node test/port.js
+ * «усыновлённого» dsh после самовозрождения). Функция — из
+ * src/system.js. Запуск: node test/port.js
  * (или npm test). Только Linux (/proc).
  */
 const assert = require('assert');
@@ -10,15 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-const lines = src.split('\n');
-const start = lines.findIndex((l) => l.includes('===== portListenerPid ====='));
-const end = lines.findIndex((l) => l.includes('===== end portListenerPid ====='));
-assert.ok(start >= 0 && end > start, 'main.js: не найдены маркеры portListenerPid');
-const portListenerPid = new Function(
-  'fs',
-  lines.slice(start, end + 1).join('\n') + '\nreturn portListenerPid;'
-)(fs);
+const { portListenerPid } = require('../src/system');
 
 const PORT = 3199;
 

@@ -1,13 +1,9 @@
 #!/usr/bin/env node
-// Юнит-тесты периодической проверки обновлений (main.js): updatePollMs —
+// Юнит-тесты периодической проверки обновлений (src/updates-logic.js): updatePollMs —
 // интервал; announceUpdates — пункты меню и уведомления по найденным версиям.
 'use strict';
 const assert = require('assert');
-const { mainSrc } = require('./_extract');
-
-const { updatePollMs, announceUpdates } = new Function(
-  mainSrc.slice(mainSrc.indexOf('/* ===== announceUpdates '), mainSrc.indexOf('/* ===== end announceUpdates ===== */')) +
-  ';return { updatePollMs, announceUpdates };')();
+const { updatePollMs, announceUpdates } = require('../src/updates-logic');
 
 // ---- updatePollMs ----
 assert.strictEqual(updatePollMs({}), 12 * 3600 * 1000, 'по умолчанию — 12 часов');

@@ -10,7 +10,7 @@ const { spawn } = require('child_process');
 const { extract } = require('./_extract');
 
 // ---- writableOrCreatable: W_OK у ближайшего существующего каталога ----
-const writableOrCreatable = extract('writableOrCreatable', { fs, path });
+const { writableOrCreatable, pgidOf } = require('../src/system');
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dshl-test-'));
 try {
   assert.strictEqual(writableOrCreatable(tmp), true, 'существующий writable-каталог → true');
@@ -33,7 +33,6 @@ try {
 }
 
 // ---- pgidOf: pgid из /proc/<pid>/stat ----
-const pgidOf = extract('pgidOf', { fs });
 {
   // Детаченый процесс — лидер собственной группы, у него pgid == свой pid.
   const child = spawn(process.execPath, ['-e', 'setTimeout(()=>{},3000)'],

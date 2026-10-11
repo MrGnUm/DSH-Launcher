@@ -7,7 +7,10 @@ const assert = require('assert');
 const { extract } = require('./_extract');
 
 // ---- splitArgs: разбор DSH_ARGS как в shell ----
-const splitArgs = extract('splitArgs');
+const { splitArgs, launcherRoute, profileFromArgs, firstErrLine, esc } = require('../src/util');
+const { envWithBinDir } = require('../src/system');
+const { proxyUrlFromRule } = require('../src/updates-logic');
+const { dpkgStatusVersion } = require('../src/versions');
 assert.deepStrictEqual(splitArgs(''), [], 'пустая строка → []');
 assert.deepStrictEqual(splitArgs('   '), [], 'только пробелы → []');
 assert.deepStrictEqual(splitArgs('a b'), ['a', 'b']);
@@ -25,14 +28,12 @@ assert.deepStrictEqual(splitArgs('--profile web --no-open'), ['--profile', 'web'
 assert.deepStrictEqual(splitArgs("a'b'"), ['ab'], 'кавычки без пробелов склеиваются с текстом');
 
 // ---- launcherRoute: dshlauncher://host/path → /host/path ----
-const launcherRoute = extract('launcherRoute');
 assert.strictEqual(launcherRoute('dshlauncher://install/run/'), '/install/run/');
 assert.strictEqual(launcherRoute('dshlauncher://menu/about/'), '/menu/about/');
 assert.strictEqual(launcherRoute('dshlauncher://market/skip/?x=1'), '/market/skip/', 'query-строка отбрасывается');
 assert.strictEqual(launcherRoute('dshlauncher://paste/http%3A%2F%2Fx%2F'), '/paste/http%3A%2F%2Fx%2F');
 
 // ---- profileFromArgs: --profile X / --profile=X ----
-const profileFromArgs = extract('profileFromArgs');
 assert.strictEqual(profileFromArgs(['--profile', 'web']), 'web');
 assert.strictEqual(profileFromArgs(['--profile=web']), 'web');
 assert.strictEqual(profileFromArgs(['--no-open', '--profile', 'web']), 'web');
@@ -41,7 +42,6 @@ assert.strictEqual(profileFromArgs(['--profile']), null, 'флаг без зна
 assert.strictEqual(profileFromArgs(['--profile=a', '--profile=b']), 'a', 'первый флаг побеждает');
 
 // ---- firstErrLine: строка ошибки, а не хвост стектрейса ----
-const firstErrLine = extract('firstErrLine');
 assert.strictEqual(firstErrLine('at foo (x)\nError: boom\nat bar'), 'Error: boom', 'строка с ошибкой, а не at-строки');
 assert.strictEqual(firstErrLine('npm ERR! code E404\nnpm ERR! notarget\nat x'), 'npm ERR! code E404 npm ERR! notarget at x', 'npm ERR! (без ERR_) → фолбэк: последние 3 строки');
 assert.strictEqual(firstErrLine('noise\nSomething ERR_ happened\nat x'), 'Something ERR_ happened', 'строка с ERR_');
@@ -54,14 +54,12 @@ assert.strictEqual(firstErrLine('x'.repeat(500)), 'x'.repeat(300), 'обрезк
 assert.strictEqual(firstErrLine('  indented error line  \n'), 'indented error line', 'обрезка по краям строк');
 
 // ---- esc: HTML-экранирование ----
-const esc = extract('esc');
 assert.strictEqual(esc('<b>"q" & \'a\'</b>'), '&lt;b&gt;&quot;q&quot; &amp; &#39;a&#39;&lt;/b&gt;');
 assert.strictEqual(esc(42), '42', 'число приводится к строке');
 assert.strictEqual(esc(null), 'null');
 assert.strictEqual(esc(''), '');
 
 // ---- envWithBinDir: каталог бинарника первым в PATH ----
-const envWithBinDir = extract('envWithBinDir', { path, process });
 {
   const oldPath = process.env.PATH;
   process.env.PATH = '/usr/bin:/bin';
@@ -85,7 +83,6 @@ assert.strictEqual(marketInPkg({ dsh: { profile: {} } }), false, 'нет bundles
 assert.strictEqual(marketInPkg({}), false);
 
 // ---- proxyUrlFromRule: правило прокси Chromium → URL для агента Node ----
-const proxyUrlFromRule = extract('proxyUrlFromRule');
 assert.strictEqual(proxyUrlFromRule('DIRECT'), null, 'DIRECT → напрямую');
 assert.strictEqual(proxyUrlFromRule(''), null, 'пусто → напрямую');
 assert.strictEqual(proxyUrlFromRule(undefined), null, 'нет правила → напрямую');
@@ -113,7 +110,7 @@ assert.strictEqual(proxyUrlFromRule('proxy p:1'), 'http://p:1', 'регистр 
 
 // ---- dpkgStatusVersion: версия пакета из /var/lib/dpkg/status ----
 {
-  const v = extract('dpkgStatusVersion');
+  const v = dpkgStatusVersion;
   const db = [
     'Package: dsh-launcher-extra', 'Status: install ok installed', 'Version: 9.9.9-1', '',
     'Package: dsh-launcher', 'Status: install ok installed', 'Priority: optional', 'Version: 1.11.0-1', 'Description: x', ' multi-line', '',

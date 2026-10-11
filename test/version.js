@@ -1,25 +1,14 @@
 'use strict';
 
 /*
- * Юнит-тесты чистых функций сравнения версий из main.js (используются
- * проверкой обновлений лаунчера и dsh). Функции извлекаются из исходника
- * между маркерами «сравнение версий» — если маркеры убрать, тест падает.
+ * Юнит-тесты сравнения версий (src/versions.js): проверка обновлений
+ * лаунчера и dsh.
  *
  * Запуск: node test/version.js   (npm test)
  */
 
 const assert = require('assert');
-const fs = require('fs');
-const path = require('path');
-
-const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
-const lines = src.split('\n');
-const start = lines.findIndex((l) => l.includes('сравнение версий'));
-const end = lines.findIndex((l) => l.includes('конец сравнения версий'));
-assert.ok(start >= 0 && end > start, 'main.js: не найдены маркеры «сравнение версий»');
-const code = lines.slice(start, end + 1).join('\n');
-const helpers = new Function(`${code}; return { compareDebianVer, compareSemVer, tagToPackageVersion };`)();
-const { compareDebianVer, compareSemVer, tagToPackageVersion } = helpers;
+const { compareDebianVer, compareSemVer, tagToPackageVersion, updateStatus } = require('../src/versions');
 
 // Debian (лаунчер)
 assert.strictEqual(compareDebianVer('1.1.1-1', '1.1.1-1'), 0, 'debian: равные');
@@ -46,8 +35,6 @@ assert.strictEqual(tagToPackageVersion('v1.1.1-R'), '1.1.1-R', 'tag: vX.Y.Z-R �
 assert.strictEqual(tagToPackageVersion('2.0.0'), '2.0.0-1', 'tag: без v');
 
 // итог проверки обновлений (меню «Проверить обновления»)
-const { extract } = require('./_extract');
-const updateStatus = extract('updateStatus', { compareDebianVer, compareSemVer, tagToPackageVersion });
 assert.strictEqual(updateStatus(null, '1.2.0', 'semver'), 'nocheck', 'status: нет ответа сервера');
 assert.strictEqual(updateStatus(null, null, 'deb'), 'nocheck', 'status: нет ответа важнее неизвестной версии');
 assert.strictEqual(updateStatus('1.2.0', null, 'semver'), 'notinstalled', 'status: версия не известна');

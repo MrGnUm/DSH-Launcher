@@ -8,7 +8,11 @@ const assert = require('assert');
 const { extract } = require('./_extract');
 
 // ---- contextMenuItems: пункты контекстного меню по правому клику ----
-const ctx = extract('contextMenuItems', { tr: (ru) => ru });
+const i18n = require('../src/i18n');
+const ui = require('../src/ui');
+// contextMenuItems на нужном языке (язык — общий, src/i18n.js)
+const inLang = (lang, fn) => (...a) => { const was = i18n.getLang(); i18n.setLang(lang); try { return fn(...a); } finally { i18n.setLang(was); } };
+const ctx = inLang('ru', ui.contextMenuItems);
 const acts = (items) => items.map((i) => (i.type ? '|' : i.action + (i.enabled ? '' : '-')));
 const all = { canCut: true, canCopy: true, canPaste: true, canSelectAll: true };
 
@@ -27,7 +31,7 @@ assert.deepStrictEqual(acts(ctx({ isEditable: false, selectionText: 'a', linkURL
 assert.strictEqual(ctx({ isEditable: true, editFlags: all }).find((i) => i.action === 'paste').label, 'Вставить', 'подписи через tr');
 
 // Английские подписи
-const ctxEn = extract('contextMenuItems', { tr: (ru, en) => en });
+const ctxEn = inLang('en', ui.contextMenuItems);
 assert.deepStrictEqual(
   ctxEn({ isEditable: true, editFlags: all, linkURL: 'https://x/' }).filter((i) => !i.type).map((i) => i.label),
   ['Copy link address', 'Cut', 'Copy', 'Paste', 'Select all'], 'EN-подписи');
@@ -214,7 +218,7 @@ assert.ok(/win\.webContents\.on\('context-menu',\s*\(_e, params\) => showContext
 
 // ---- keyAction: клавиша → действие «Вида» ----
 {
-  const ka = extract('keyAction');
+  const ka = ui.keyAction;
   const k = (o) => ka({ type: 'keyDown', control: false, shift: false, key: '', code: '', ...o });
   assert.strictEqual(k({ key: 'F5' }), 'reload', 'F5');
   assert.strictEqual(k({ control: true, code: 'KeyR', key: 'к' }), 'reload', 'Ctrl+R в русской раскладке');
@@ -235,8 +239,7 @@ assert.ok(/win\.webContents\.on\('context-menu',\s*\(_e, params\) => showContext
 
 // ---- windowSize: размер окна из сохранённого состояния ----
 {
-  const deps = { WIN_DEFAULT: { width: 1440, height: 900 }, WIN_MIN: { width: 760, height: 480 } };
-  const ws = extract('windowSize', deps);
+  const ws = ui.windowSize;
   const wa = { width: 1920, height: 1050 };
   assert.deepStrictEqual(ws(null, wa), { width: 1440, height: 900, maximized: false }, 'нет состояния → по умолчанию');
   assert.deepStrictEqual(ws({ width: 1200, height: 800, maximized: true }, wa), { width: 1200, height: 800, maximized: true }, 'сохранённое');
@@ -249,7 +252,7 @@ assert.ok(/win\.webContents\.on\('context-menu',\s*\(_e, params\) => showContext
 
 // ---- gpuStatus: GPU-ускорение для «О программе» ----
 {
-  const g = extract('gpuStatus');
+  const g = ui.gpuStatus;
   const DAY = 86400000;
   const base = { noGpuRequested: false, disabledByMarker: false, hasRenderNode: true, hasEgl: true, markerAgeMs: null, ttlMs: 30 * DAY };
   assert.deepStrictEqual(g(base), { on: true, reason: null, marker: false, daysLeft: 0 }, 'включено');

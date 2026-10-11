@@ -1,0 +1,74 @@
+'use strict';
+// Процессы и файлы: окружение запуска, права на запись, группы процессов,
+// кто слушает порт, какие процессы останавливать.
+const fs = require('fs');
+const path = require('path');
+
+function envWithBinDir(bin, extra) {
+  return { ...process.env, PATH: path.dirname(bin) + path.delimiter + (process.env.PATH || ''), ...extra };
+}
+
+function writableOrCreatable(dir) {
+  while (!fs.existsSync(dir) && path.dirname(dir) !== dir) dir = path.dirname(dir);
+  try { fs.accessSync(dir, fs.constants.W_OK); return true; } catch { return false; }
+}
+
+function groupAlive(pid, groupOnly = false) {
+  try { process.kill(-pid, 0); return true; } catch { /* noop */ }
+  if (groupOnly) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+function portListenerPid(port) {
+  const hexPort = port.toString(16).toUpperCase().padStart(4, '0');
+  const inodes = new Set();
+  for (const file of ['/proc/net/tcp', '/proc/net/tcp6']) {
+    let data;
+    try { data = fs.readFileSync(file, 'utf8'); } catch { continue; }
+    for (const line of data.split('\n').slice(1)) {
+      const c = line.trim().split(/\s+/);
+      // c[1]=local(IP:PORT), c[3]=state ('0A'=LISTEN), c[9]=inode
+      if (c.length < 10 || c[3] !== '0A') continue;
+      if (!c[1].endsWith(':' + hexPort)) continue;
+      inodes.add(c[9]);
+    }
+  }
+  if (inodes.size === 0) return null;
+  let pids;
+  try { pids = fs.readdirSync('/proc').filter((n) => /^\d+$/.test(n)); } catch { return null; }
+  for (const pid of pids) {
+    let fds;
+    try { fds = fs.readdirSync(`/proc/${pid}/fd`); } catch { continue; }
+    for (const fd of fds) {
+      let link;
+      try { link = fs.readlinkSync(`/proc/${pid}/fd/${fd}`); } catch { continue; }
+      const m = /^socket:\[(\d+)\]$/.exec(link);
+      if (m && inodes.has(m[1])) return Number(pid);
+    }
+  }
+  return null;
+}
+
+function pgidOf(pid) {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const pgid = Number(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[2]);
+    return pgid > 0 ? pgid : null;
+  } catch { return null; }
+}
+
+/* portPid — процесс на порту (или null), portPgid — его группа (или null),
+   selfPgid — группа лаунчера, oldPgid — группа исходного dsh (или null). */
+function pickKillTargets(portPid, portPgid, selfPgid, oldPgid) {
+  const targets = [];
+  if (portPid) {
+    if (portPgid && portPgid !== selfPgid) targets.push({ id: portPgid, groupOnly: true });
+    else targets.push({ id: portPid, groupOnly: false }); // группа наша/неизвестна — только сам процесс
+  }
+  if (oldPgid && oldPgid !== selfPgid && !targets.some((t) => t.id === oldPgid)) {
+    targets.push({ id: oldPgid, groupOnly: true });
+  }
+  return targets;
+}
+
+module.exports = { envWithBinDir, writableOrCreatable, groupAlive, portListenerPid, pgidOf, pickKillTargets };

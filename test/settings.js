@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Юнит-тесты окна «Настройки» (main.js): effectiveConfig — итоговые параметры
+// Юнит-тесты окна «Настройки» (src/config.js): effectiveConfig — итоговые параметры
 // из переменных окружения (важнее) и settings.json; settingValue — проверка
 // значений полей; restartNeeded — что изменится после перезапуска.
 'use strict';
 const assert = require('assert');
-const { extract, mainSrc } = require('./_extract');
+const i18n = require('../src/i18n');
+const { effectiveConfig: cfg, settingValue, restartNeeded } = require('../src/config');
 
-const splitArgs = extract('splitArgs');
-const cfg = extract('effectiveConfig', { splitArgs, DEFAULT_PORT: 3080, DEFAULT_PROFILE: 'web' });
+i18n.setLang('ru');
 const HOME = '/home/u';
 
 // ---- effectiveConfig: по умолчанию ----
@@ -60,9 +60,6 @@ const HOME = '/home/u';
 }
 
 // ---- settingValue: проверка полей; restartNeeded ----
-const { settingValue, restartNeeded } = new Function('tr',
-  mainSrc.slice(mainSrc.indexOf('/* ===== settingValue '), mainSrc.indexOf('/* ===== end settingValue ===== */')) +
-  ';return { settingValue, restartNeeded };')((ru) => ru);
 
 assert.deepStrictEqual(settingValue('port', ' 3090 '), { value: 3090 }, 'порт');
 for (const bad of ['80', '70000', 'abc', '', '30.5']) assert.ok(settingValue('port', bad).error, `порт «${bad}» — ошибка`);

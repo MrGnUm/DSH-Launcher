@@ -9,7 +9,7 @@ const { extract } = require('./_extract');
 
 (async () => {
   // ---- timedCheck: сеть с дедлайном не должна держать окно на вопросе ----
-  const timedCheck = extract('timedCheck');
+  const { timedCheck } = require('../src/util');
   assert.strictEqual(await timedCheck(Promise.resolve(42), 1000), 42, 'быстрое значение возвращается');
   assert.strictEqual(await timedCheck(new Promise(() => {}), 50), null, 'таймаут → null');
   assert.strictEqual(await timedCheck(Promise.reject(new Error('x')), 1000), null, 'ошибка промиса → null');
@@ -20,7 +20,7 @@ const { extract } = require('./_extract');
   assert.ok(retryButton().includes('Проверить снова'), 'RU-подпись');
 
   // ---- pageHtml: разметка служебной страницы ----
-  const esc = extract('esc');
+  const { esc } = require('../src/util');
   const pageHtml = extract('pageHtml', { UI_LANG: 'ru', esc, PAGE_CSS: 'CSS' });
   const prefix = 'data:text/html;charset=utf-8,';
   const htmlOf = (data) => decodeURIComponent(data.slice(prefix.length));
@@ -46,7 +46,7 @@ const { extract } = require('./_extract');
   assert.ok(bad.includes('a&lt;b'), 'title экранируется');
 
   // ---- groupAlive: жив ли процесс или вся его группа ----
-  const groupAlive = extract('groupAlive', { process });
+  const { groupAlive } = require('../src/system');
   assert.strictEqual(groupAlive(process.pid), true, 'свой pid → жив');
   assert.strictEqual(groupAlive(999999999), false, 'несуществующий → false');
   assert.strictEqual(groupAlive(999999999, true), false, 'groupOnly, несуществующий → false');

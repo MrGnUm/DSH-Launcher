@@ -1,13 +1,9 @@
 #!/usr/bin/env node
-// Юнит-тесты отчёта для поддержки (main.js): reportFileName — имя архива,
+// Юнит-тесты отчёта для поддержки (src/ui.js): reportFileName — имя архива,
 // reportInfoText — сведения «ключ: значение».
 'use strict';
 const assert = require('assert');
-const { mainSrc } = require('./_extract');
-
-const { reportFileName, reportInfoText } = new Function(
-  mainSrc.slice(mainSrc.indexOf('/* ===== reportFileName '), mainSrc.indexOf('/* ===== end reportFileName ===== */')) +
-  ';return { reportFileName, reportInfoText };')();
+const { reportFileName, reportInfoText } = require('../src/ui');
 
 assert.strictEqual(reportFileName(new Date(2026, 0, 5, 9, 7)), 'dsh-launcher-report-20260105-0907.tar.gz', 'нули впереди');
 assert.strictEqual(reportFileName(new Date(2026, 11, 31, 23, 59)), 'dsh-launcher-report-20261231-2359.tar.gz', 'конец года');
