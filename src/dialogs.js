@@ -1,0 +1,221 @@
+'use strict';
+// Окно-диалог поверх главного: открытие, содержимое, закрытие, «О программе», «Проверить обновления…».
+const { BrowserWindow, shell, clipboard } = require('electron');
+const util = require('util');
+const os = require('os');
+const state = require('./state');
+const i18n = require('./i18n');
+const { tr } = i18n;
+const { esc, timedCheck } = require('./util');
+const { updateStatus, notesBetween } = require('./versions');
+const { LOG_DIR } = require('./env');
+const launcher = require('./launcher'); // общий реестр (наполняет main.js)
+
+/* ---------------- окно-диалог: «О программе», «Проверить обновления» ---------------- */
+
+// Небольшое модальное окно поверх основного. GUI dsh под ним никуда не
+// уходит — не перезагружается и не теряет состояние. Одно окно на оба
+// пункта: повторный вызов меняет содержимое. Закрыть — кнопкой, Esc или
+// крестиком окна. Кнопки — переходы на dshlauncher://dialog/… (ответ 204:
+// страница остаётся, обработчик делает своё).
+
+
+let dialogGen = 0;       // поколение: поздний async-результат не попадёт в закрытый или сменившийся диалог
+
+
+
+// Затемнение содержимого главного окна, пока открыт диалог: слой поверх
+// страницы (только CSS, разметку GUI dsh не трогаем). Клики под ним и так
+// не проходят — диалог модальный.
+const DIM_CSS = `
+  @keyframes dshl-dim { from { opacity: 0 } to { opacity: 1 } }
+  html::after { content: ''; position: fixed; inset: 0; z-index: 2147483647;
+    background: rgba(0, 0, 0, 0.55); pointer-events: none;
+    animation: dshl-dim .15s ease-out; }`;
+
+async function dimMain(on) {
+  if (!state.win || state.win.isDestroyed() || state.win.webContents.isDestroyed() || state.stopping) return;
+  const wc = state.win.webContents;
+  try {
+    if (on && !state.dimKey) state.dimKey = await wc.insertCSS(DIM_CSS);
+    else if (!on && state.dimKey) { const k = state.dimKey; state.dimKey = null; await wc.removeInsertedCSS(k); }
+  } catch (e) { console.error('[launcher] затемнение:', e.message); }
+}
+
+// Открыть диалог (или переиспользовать открытый) — поколение нового содержимого,
+// null — окна нет / идёт выход.
+function openDialog(title) {
+  if (!state.win || state.win.isDestroyed() || state.stopping) return null;
+  dialogGen++;
+  if (state.dialogWin && !state.dialogWin.isDestroyed()) { state.dialogWin.focus(); return dialogGen; }
+  const d = new BrowserWindow({
+    parent: state.win,
+    modal: true,
+    width: 760,
+    height: 580,
+    minWidth: 520,
+    minHeight: 360,
+    resizable: true, // длинный «Что нового» можно растянуть
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    title,
+    backgroundColor: '#0f1115',
+    show: false,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, spellcheck: false },
+  });
+  state.dialogWin = d;
+  d.setMenu(null);
+  d.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  d.webContents.on('context-menu', (_e, params) => launcher.showContextMenu(params, d));
+  d.webContents.on('before-input-event', (e, input) => {
+    if (input.type === 'keyDown' && input.key === 'Escape') { e.preventDefault(); d.close(); }
+  });
+  void dimMain(true);
+  d.once('ready-to-show', () => d.show());
+  // Wayland: ready-to-show может опоздать (как у главного окна) — показываем сами.
+  setTimeout(() => { if (!d.isDestroyed() && !d.isVisible()) d.show(); }, 3000);
+  d.on('closed', () => {
+    if (state.dialogWin === d) { state.dialogWin = null; state.dialogRender = null; dialogGen++; }
+    void dimMain(false);
+  });
+  return dialogGen;
+}
+
+// Показать содержимое, если диалог того же поколения ещё открыт.
+function dialogShow(gen, render) {
+  if (gen !== dialogGen || !state.dialogWin || state.dialogWin.isDestroyed()) return;
+  state.dialogRender = render;
+  render(false);
+}
+
+function dialogPage(title, body) {
+  if (!state.dialogWin || state.dialogWin.isDestroyed()) return;
+  state.dialogWin.loadURL(launcher.pageHtml(title, body, false, { dialog: true }))
+    .catch((e) => { if (e.code !== 'ERR_ABORTED') console.error('[launcher] диалог:', e.message); });
+}
+
+const dialogCloseButton = () =>
+  `<button onclick="location.href='dshlauncher://dialog/close/'">${tr('Закрыть', 'Close')}</button>`;
+
+function onDialogClose() {
+  if (state.dialogWin && !state.dialogWin.isDestroyed()) state.dialogWin.close();
+  return launcher.noContentResponse();
+}
+
+function onDialogCopy() {
+  if (state.dialogCopyText) clipboard.writeText(state.dialogCopyText);
+  if (state.dialogRender) state.dialogRender(true); // перерисовка: «Скопировано»
+  return launcher.noContentResponse();
+}
+
+async function showAboutDialog() {
+  const title = tr('О программе', 'About');
+  const gen = openDialog(title);
+  if (gen === null) return;
+  const ver = { lver: null, dver: null, loaded: false };
+  const render = (copied) => {
+    const gpu = launcher.gpuStatusNow();
+    const fromSrc = !process.execPath.startsWith('/opt/dsh-launcher/');
+    const lLabel = fromSrc ? tr(' (сборка из исходников)', ' (built from source)') : '';
+    const lDisp = ver.loaded ? (ver.lver || tr('неизвестно', 'unknown')) : tr('загружаю…', 'loading…');
+    const dDisp = ver.loaded ? (ver.dver || tr('не установлен', 'not installed')) : tr('загружаю…', 'loading…');
+    const rows = [
+      ['DeepSeek Harness Launcher', lDisp + lLabel],
+      [tr('бэкенд dsh', 'dsh backend'), dDisp],
+      [tr('путь к dsh', 'path to dsh'), state.dshBin || '—'],
+      ['Node.js', 'v' + process.versions.node],
+      [tr('ОС', 'OS'), os.platform() + ' ' + os.release() + ' (' + os.arch() + ')'],
+      [tr('GPU-ускорение', 'GPU acceleration'), launcher.gpuStatusText(gpu)],
+      [tr('логи', 'logs'), LOG_DIR],
+    ];
+    state.dialogCopyText = ver.loaded ? rows.map(([k, v]) => k + ': ' + v).join('\n') : '';
+    const body = `
+      <table style="border-collapse:collapse; margin-bottom:4px">
+        ${rows.map(([k, v]) =>
+          '<tr><td style="padding:3px 14px 3px 0; color:#9aa4b2; white-space:nowrap">' + esc(k) + '</td>' +
+          '<td style="padding:3px 0"><code>' + esc(v) + '</code></td></tr>').join('')}
+      </table>
+      <p style="margin-top:10px">
+        <a href="https://github.com/Toximiner/DSH-Launcher" target="_blank">${tr('Репозиторий лаунчера (GitHub)', 'Launcher repository (GitHub)')}</a> ·
+        <a href="https://www.npmjs.com/package/@deepseek-ai/dsh" target="_blank">@deepseek-ai/dsh</a>
+      </p>
+      <div class="actions">
+        ${ver.loaded ? '<button onclick="location.href=\'dshlauncher://dialog/copy/\'">' + (copied ? tr('Скопировано', 'Copied') : tr('Скопировать для отчёта', 'Copy for report')) + '</button>' : ''}
+        <button onclick="location.href='dshlauncher://dialog/logs/'">${tr('Папка логов', 'Logs folder')}</button>
+        <button onclick="location.href='dshlauncher://menu/report/'">${tr('Сохранить отчёт…', 'Save report…')}</button>
+        ${gpu.marker ? '<button onclick="location.href=\'dshlauncher://dialog/gpu-enable/\'">' + tr('Включить GPU снова', 'Re-enable GPU') + '</button>' : ''}
+        ${dialogCloseButton()}
+      </div>`;
+    dialogPage(title, body);
+  };
+  dialogShow(gen, render);
+  // Версии подставим, когда придут (dsh --version может занять до 8 с)
+  const [lver, dver] = await Promise.all([launcher.launcherVersionRaw(), launcher.dshVersionRaw()]);
+  Object.assign(ver, { lver, dver, loaded: true });
+  dialogShow(gen, render);
+}
+
+async function showUpdateCheckDialog() {
+  const title = tr('Проверка обновлений', 'Update check');
+  const gen = openDialog(title);
+  if (gen === null) return;
+  state.dialogCopyText = '';
+  dialogShow(gen, () => dialogPage(title,
+    '<p>' + tr('Проверяю…', 'Checking…') + '</p>' +
+    '<div class="actions">' + dialogCloseButton() + '</div>'));
+  const [latestL, latestD] = await Promise.all([
+    timedCheck(launcher.fetchLauncherLatest({ force: true }), launcher.UPDATE_CHECK_TIMEOUT),
+    timedCheck(launcher.fetchDshLatest(), launcher.UPDATE_CHECK_TIMEOUT),
+  ]);
+  const [lver, dver] = await Promise.all([launcher.launcherVersionRaw(), launcher.dshVersionRaw()]);
+  const isSrc = !process.execPath.startsWith('/opt/dsh-launcher/');
+  const lSt = updateStatus(latestL && latestL.version, lver, isSrc ? 'semver' : 'deb');
+  const dSt = updateStatus(latestD && latestD.version, dver, 'semver');
+  // найденное — и в меню «Справка» (уведомлять не нужно: окно и так открыто)
+  const canL = lSt === 'available' && !isSrc && Boolean(lver);
+  const canD = dSt === 'available' && Boolean(dver);
+  if (!launcher.NO_UPDATE_CHECK || canL || canD) {
+    launcher.setAvailableUpdates({
+      ...(canL ? { launcher: { version: latestL.version, installed: lver, releases: latestL.releases } } : {}),
+      ...(canD ? { dsh: { version: latestD.version, installed: dver } } : {}),
+    }, false);
+  }
+  // Диалог закрыли или открыли в нём другое — dialogShow ничего не покажет.
+  dialogShow(gen, () => {
+    let lStatus;
+    if (lSt === 'nocheck') lStatus = tr('не удалось проверить (нет ответа GitHub)', 'could not check (no reply from GitHub)');
+    else if (lSt === 'uptodate') lStatus = tr('актуальная версия', 'up to date');
+    // 'notinstalled' (версию не узнали) — как и раньше, просто называем последнюю
+    else lStatus = tr('доступна версия <code>' + esc(latestL.version) + '</code>', 'version <code>' + esc(latestL.version) + '</code> is available');
+    let dStatus;
+    if (dSt === 'nocheck') dStatus = tr('не удалось проверить (нет ответа npm)', 'could not check (no reply from npm)');
+    else if (dSt === 'notinstalled') dStatus = tr('dsh не установлен', 'dsh is not installed');
+    else if (dSt === 'uptodate') dStatus = tr('актуальная версия', 'up to date');
+    else dStatus = tr('доступна версия <code>' + esc(latestD.version) + '</code>', 'version <code>' + esc(latestD.version) + '</code> is available');
+    const row = (name, ver, status) =>
+      '<tr><td style="padding:3px 14px 3px 0; color:#9aa4b2; white-space:nowrap">' + esc(name) + '</td>' +
+      '<td style="padding:3px 0">' +
+      (ver ? tr('установлена ', 'installed ') + '<code>' + esc(ver) + '</code>' + ' — ' + status : status) +
+      '</td></tr>';
+    const body = `
+      <table style="border-collapse:collapse; margin-bottom:14px">
+        ${row('DeepSeek Harness Launcher', lver, lStatus)}
+        ${row(tr('бэкенд dsh', 'dsh backend'), dver, dStatus)}
+      </table>
+      ${lSt === 'available' ? launcher.notesBlockHtml(notesBetween(latestL.releases, lver, latestL.version, isSrc ? 'semver' : 'deb')) : ''}
+      ${canL || canD ? '<p class="hint">' + tr('«Обновить» перезапустит лаунчер, dsh будет остановлен — незаконченный ответ агента прервётся.',
+        '“Update” restarts the launcher and stops dsh — an unfinished agent reply will be interrupted.') + '</p>' : ''}
+      <div class="actions">
+        ${canL ? `<button onclick="location.href='dshlauncher://update-now/?k=launcher'">${tr('Обновить DeepSeek Harness Launcher', 'Update DeepSeek Harness Launcher')}</button>` : ''}
+        ${canD ? `<button onclick="location.href='dshlauncher://update-now/?k=dsh'">${tr('Обновить dsh', 'Update dsh')}</button>` : ''}
+        ${dialogCloseButton()}
+      </div>`;
+    dialogPage(title, body);
+  });
+}
+
+module.exports = { dimMain, openDialog, dialogShow, dialogPage, dialogCloseButton, onDialogClose, onDialogCopy, showAboutDialog, showUpdateCheckDialog };

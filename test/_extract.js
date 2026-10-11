@@ -7,11 +7,16 @@ const path = require('path');
 
 const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 
+// помеченные блоки ищем в main.js и в модулях src/ (код переезжает из main.js)
+const srcDir = path.join(__dirname, '..', 'src');
+const sources = [mainSrc, ...fs.readdirSync(srcDir).filter((f) => f.endsWith('.js')).map((f) => fs.readFileSync(path.join(srcDir, f), 'utf8'))];
+
 function extract(name, deps = {}) {
-  const s = mainSrc.indexOf('/* ===== ' + name + ' ');
-  const e = mainSrc.indexOf('/* ===== end ' + name + ' ===== */');
-  if (!(s >= 0 && e > s)) throw new Error('маркеры не найдены: ' + name);
-  const code = mainSrc.slice(s, e);
+  const text = sources.find((t) => t.includes('/* ===== ' + name + ' ') && t.includes('/* ===== end ' + name + ' ===== */'));
+  if (!text) throw new Error('маркеры не найдены: ' + name);
+  const s = text.indexOf('/* ===== ' + name + ' ');
+  const e = text.indexOf('/* ===== end ' + name + ' ===== */');
+  const code = text.slice(s, e);
   const names = Object.keys(deps);
   return new Function(...names, code + '\nreturn ' + name + ';')(...Object.values(deps));
 }

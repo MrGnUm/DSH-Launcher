@@ -22,4 +22,8 @@ module.exports = {
   dialogCopyText: '',        // текст «Скопировать для отчёта»
   tray: null, // (перенесено при разбиении main.js)
   lastReportPath: null, // (перенесено при разбиении main.js)
+  dimKey: null, // (перенесено при разбиении main.js)
+  UI_LANG: null, // (перенесено при разбиении main.js)
+  settingsSection: null, // (перенесено при разбиении main.js)
+  availableUpdates: {}, // (перенесено при разбиении main.js)
 };

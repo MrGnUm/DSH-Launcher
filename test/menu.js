@@ -127,7 +127,7 @@ assert.ok(/win\.webContents\.on\('context-menu',\s*\(_e, params\) => showContext
   const mk = (tr, spellcheckOn = true, availableUpdates = {}) => extract('appMenuTemplate', {
     tr,
     spellcheckOn,
-    availableUpdates,
+    state: { availableUpdates },
     showUpdateNowDialog: (kind) => calls.push('update:' + kind),
     viewActions,
     showAboutDialog: () => calls.push('about'),
