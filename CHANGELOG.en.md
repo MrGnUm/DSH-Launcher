@@ -13,6 +13,9 @@ The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
   instance starts once the previous one has fully exited and no longer
   inherits its open files and sockets (Chromium left them inheritable); the
   same after an update.
+- **dsh no longer gets the launcher’s open files and sockets.** It used to
+  inherit dozens of Chromium descriptors (shared memory, sockets) and kept
+  them even if the launcher crashed.
 
 ## [1.10.0] — 2026-10-11
 

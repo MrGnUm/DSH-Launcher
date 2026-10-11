@@ -586,6 +586,18 @@ async function npmInstallInfo() {
 
 /* ---------------- запуск процесса dsh ---------------- */
 
+// Chromium держит часть своих дескрипторов (разделяемая память, сокеты,
+// icudtl.dat, порт отладки…) без «закрыть при exec» — дочерний процесс
+// получал бы их все. Поэтому долгоживущие процессы (dsh, новый экземпляр
+// лаунчера) запускаются через bash, который закрывает всё, кроме 0–2, и
+// делает exec (pid — тот же). bash, а не sh: dash не закрывает дескрипторы с
+// номером больше 9.
+const CLOSE_INHERITED_FDS = 'for f in /proc/$$/fd/*; do n=${f##*/}; if [ "$n" -gt 2 ] 2>/dev/null; then eval "exec $n>&-" 2>/dev/null; fi; done; ';
+
+function spawnClean(cmd, args, opts) {
+  return spawn('/bin/bash', ['-c', CLOSE_INHERITED_FDS + 'exec "$@"', 'dsh-launcher', cmd, ...args], opts);
+}
+
 function startDsh() {
   // dsh.log пишет только startDsh (stdout dsh) — ротируем перед открытием потока.
   const rotated = rotateLog(LOG_FILE);
@@ -594,12 +606,17 @@ function startDsh() {
   const logStream = openDshLog(LOG_FILE);
   authUrl = null; // токен прошлого процесса недействителен — ждём новый
   console.log(`[launcher] starting: ${DSH_BIN} ${DSH_ARGS.join(' ')} (cwd=${CWD}, log=${LOG_FILE})`);
-  dshProc = spawn(DSH_BIN, DSH_ARGS, {
+  const opts = {
     cwd: CWD,
     env: dshEnv({ DSH_STARTED_BY: 'dsh-launcher' }),
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true, // dsh становится лидером своей процесс-группы — можно убить всё дерево
-  });
+  };
+  // Через bash (spawnClean) ошибку «нет такой программы» spawn не вернёт —
+  // такую (и команду без пути, из PATH) запускаем напрямую: 'error' как раньше.
+  let direct = false;
+  try { fs.accessSync(DSH_BIN, fs.constants.X_OK); } catch { direct = true; }
+  dshProc = direct || !path.isAbsolute(DSH_BIN) ? spawn(DSH_BIN, DSH_ARGS, opts) : spawnClean(DSH_BIN, DSH_ARGS, opts);
   weStartedDsh = true;
   adoptedDsh = false; // снова собственный процесс — «усыновлённого» больше нет
   adoptedOldPgid = null;
@@ -2984,13 +3001,11 @@ function relaunchLauncher(why = 'чтобы применить настройк�
 }
 
 // Новый экземпляр лаунчера — отдельно от этого, через bash: закрыть
-// унаследованные дескрипторы, кроме 0–2 (Chromium открывает часть своих —
-// например, порт отладки — без «закрыть при exec», и новый экземпляр получал
-// бы их), дождаться, пока этот процесс выйдет (до 20 с), и exec — тот же pid.
-// bash, а не sh: dash не закрывает дескрипторы с номером больше 9.
+// унаследованные дескрипторы (CLOSE_INHERITED_FDS), дождаться, пока этот
+// процесс выйдет (до 20 с), и exec — тот же pid.
 // $0 — pid этого процесса, "$@" — команда нового экземпляра.
 function spawnLauncherAfterExit(cmd, args, stdio) {
-  const script = 'for f in /proc/$$/fd/*; do n=${f##*/}; if [ "$n" -gt 2 ] 2>/dev/null; then eval "exec $n>&-" 2>/dev/null; fi; done; ' +
+  const script = CLOSE_INHERITED_FDS +
     'i=0; while kill -0 "$0" 2>/dev/null && [ $i -lt 200 ]; do sleep 0.1; i=$((i+1)); done; exec "$@"';
   return spawn('/bin/bash', ['-c', script, String(process.pid), cmd, ...args], { detached: true, stdio, env: process.env });
 }

@@ -1,7 +1,9 @@
 """Диагностика: «Справка → Сохранить отчёт…» (архив со сведениями и
 журналами, токены скрыты) и плашка «прошлый запуск завершился аварийно»."""
 import os
+import re
 import signal
+import subprocess
 import tarfile
 
 from helpers.env import FAKE, INSTALLED, NOUPD
@@ -48,4 +50,24 @@ def test_crash_notice(start, gui, drv):
     gui.wait()
     assert 'завершился аварийно' not in launcher.log(), 'после штатного выхода — без плашки'
     assert not Toast(drv).is_shown()
+    launcher.term()
+
+
+def test_dsh_clean_fds(start, gui):
+    """dsh не получает открытые дескрипторы Chromium (разделяемая память,
+    сокеты, порт отладки…): лаунчер запускает его, закрыв всё, кроме 0–2."""
+    launcher = start(FAKE, NOUPD)
+    gui.wait()
+    out = subprocess.run(['pgrep', '-u', 'tester', '-f', 'fakes/fakedsh.py'], capture_output=True, text=True).stdout
+    pids = [int(p) for p in out.split()]
+    assert pids, 'фейковый dsh запущен'
+    for pid in pids:
+        targets = []
+        for fd in os.listdir(f'/proc/{pid}/fd'):
+            try:
+                targets.append(os.readlink(f'/proc/{pid}/fd/{fd}'))
+            except OSError:
+                pass
+        leaked = [t for t in targets if re.search(r'chromium|icudtl|\.asar|\.pak', t)]
+        assert not leaked, f'dsh {pid} унаследовал: {leaked}'
     launcher.term()
