@@ -6,6 +6,7 @@
   FAKE_SELF_RESTART_AFTER  — через N с перезапуститься самому (как dsh после
                              обновления плагина); FAKE_REBORN_DETACHED=1 — новый
                              процесс в своей группе (иначе — в той же)
+  FAKE_SPAM_LINES          — после адреса напечатать столько строк (журнал растёт)
 Журнал событий — /tmp/fakedsh.log.
 """
 import http.server
@@ -65,6 +66,8 @@ while True:  # порт ещё занят старым процессом (по�
         time.sleep(0.2)
 log('listening')
 print(f'dsh web: http://127.0.0.1:{port}/?token=abc', flush=True)
+for i in range(int(os.environ.get('FAKE_SPAM_LINES', '0'))):
+    print(f'spam line {i:05d} ' + '.' * 60, flush=True)
 
 after = float(os.environ.get('FAKE_SELF_RESTART_AFTER') or 0)
 if ROLE == 'main' and after:

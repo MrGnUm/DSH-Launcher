@@ -15,6 +15,13 @@ The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
   moved to `launcher.log.1` after 2 MB. These messages used to be lost when
   started from the desktop shortcut.
 
+### Fixed
+
+- **Logs no longer grow without limit.** `dsh.log` was moved to `dsh.log.1`
+  only when dsh started; with the launcher open for weeks the file could grow
+  indefinitely. Now this also happens while running; at most four log files
+  (~8 MB) on disk.
+
 ## [1.8.1] — 2026-10-11
 
 ### Fixed

@@ -201,7 +201,9 @@ own node even when launched from the desktop shortcut.
 
 The dsh process log is written to `logs/dsh.log`, the launcher’s own log
 (update checks, starting and stopping dsh, errors; timestamped, tokens
-hidden) to `logs/launcher.log`. Both are moved to `*.1` after 2 MB.
+hidden) to `logs/launcher.log`. Both are moved to `*.1` after 2 MB (at
+startup and while running), replacing the previous one: at most four log
+files, ~8 MB, on disk.
 
 ## Keys in the window
 

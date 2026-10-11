@@ -4,7 +4,7 @@ import os
 import re
 
 from helpers.env import FAKE, NOUPD, STATE
-from helpers.procs import as_tester
+from helpers.procs import as_tester, wait_for
 
 LOG = f'{STATE}/launcher.log'
 
@@ -40,3 +40,20 @@ def test_launcher_log_rotate(start, gui):
     text = read(LOG)
     assert 'лог прокручен: launcher.log (2200000 Б) -> launcher.log.1' in text, text[:500]
     assert os.path.getsize(LOG) < 100000, 'новый журнал — с начала'
+
+
+def test_log_rotate_while_running(start, gui):
+    """Ротация и во время работы, а не только при запуске: на каждый журнал —
+    не больше двух файлов (*.log и *.log.1), каждый не больше порога."""
+    max_bytes = 3000
+    launcher = start(FAKE, NOUPD, DSH_LAUNCHER_LOG_MAX_BYTES=str(max_bytes), FAKE_SPAM_LINES='500')
+    gui.wait()
+    assert wait_for(lambda: 'spam line 00499' in read(f'{STATE}/dsh.log'), 30), 'dsh допечатал'
+    launcher.term()
+
+    logs = sorted(n for n in os.listdir(STATE) if '.log' in n)  # кроме, например, маркера GPU
+    assert logs == ['dsh.log', 'dsh.log.1', 'launcher.log', 'launcher.log.1'], logs
+    for name in logs:
+        # ротация — до записи: ни один файл не больше порога
+        assert os.path.getsize(f'{STATE}/{name}') <= max_bytes, f'{name}: {os.path.getsize(f"{STATE}/{name}")} Б'
+    assert 'spam line 00499' in read(f'{STATE}/dsh.log'), 'последние строки dsh — в новом файле'

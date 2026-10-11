@@ -170,9 +170,12 @@ const START_TIMEOUT = Number(process.env.DSH_START_TIMEOUT_MS || 120000); // с�
 const LOG_DIR = process.env.DSH_LOG_DIR || path.join(__dirname, 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'dsh.log');
 const LAUNCHER_LOG_FILE = path.join(LOG_DIR, 'launcher.log');
-const MAX_LOG_BYTES = 2 * 1024 * 1024; // 2 МБ — дальше файл сдвигается в *.1
+// 2 МБ — дальше файл сдвигается в *.1 (DSH_LAUNCHER_LOG_MAX_BYTES — для тестов).
+// Старый *.1 при этом заменяется: на каждый журнал не больше двух файлов.
+const MAX_LOG_BYTES = Number(process.env.DSH_LAUNCHER_LOG_MAX_BYTES) > 0
+  ? Number(process.env.DSH_LAUNCHER_LOG_MAX_BYTES) : 2 * 1024 * 1024;
 
-// Простая ротация: файл больше MAX_LOG_BYTES — сдвигаем в <файл>.1.
+// Ротация при открытии: файл больше MAX_LOG_BYTES — сдвигаем в <файл>.1.
 function rotateLog(file) {
   try {
     const st = fs.statSync(file);
@@ -190,10 +193,18 @@ function startLauncherLog() {
   const rotated = rotateLog(LAUNCHER_LOG_FILE);
   try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch { /* noop */ }
   let ok = true;
+  let size = 0;
+  try { size = fs.statSync(LAUNCHER_LOG_FILE).size; } catch { /* нового ещё нет */ }
   const write = (text) => {
     if (!ok) return;
-    try { fs.appendFileSync(LAUNCHER_LOG_FILE, text); }
-    catch { ok = false; } // нет доступа — журнал без файла, лаунчер работает
+    try {
+      // и во время работы (лаунчер может быть открыт неделями) — до записи,
+      // чтобы текущий файл всегда был
+      const n = Buffer.byteLength(text);
+      if (size > 0 && size + n > MAX_LOG_BYTES) { fs.renameSync(LAUNCHER_LOG_FILE, LAUNCHER_LOG_FILE + '.1'); size = 0; }
+      fs.appendFileSync(LAUNCHER_LOG_FILE, text);
+      size += n;
+    } catch { ok = false; } // нет доступа — журнал без файла, лаунчер работает
   };
   for (const level of ['log', 'warn', 'error']) {
     const orig = console[level].bind(console);
@@ -212,6 +223,34 @@ function startLauncherLog() {
   if (rotated) console.log(`[launcher] лог прокручен: launcher.log (${rotated} Б) -> launcher.log.1`);
 }
 startLauncherLog();
+
+// Поток в журнал dsh с ротацией и во время работы (dsh бывает разговорчив, а
+// лаунчер открыт неделями): строка не помещается в MAX_LOG_BYTES — прежний
+// поток дописывает своё в <файл>.1 (уже переименованный), строка — в новый файл.
+function openDshLog(file) {
+  let size = 0;
+  try { size = fs.statSync(file).size; } catch { /* файла ещё нет */ }
+  const open = () => {
+    const st = fs.createWriteStream(file, { flags: 'a' });
+    st.on('error', (e) => console.error('[launcher] dsh.log:', e.message));
+    return st;
+  };
+  let stream = open();
+  return {
+    write(text) {
+      const n = Buffer.byteLength(text);
+      if (size > 0 && size + n > MAX_LOG_BYTES) {
+        stream.end();
+        try { fs.renameSync(file, file + '.1'); } catch { /* noop */ }
+        stream = open();
+        size = 0;
+      }
+      stream.write(text);
+      size += n;
+    },
+    end() { stream.end(); },
+  };
+}
 
 // Язык окон лаунчера: DSH_LAUNCHER_LANG=ru|en, иначе выбор переключателем
 // RU | EN в окне (userData/ui-lang.json, подхватывается в onReady), иначе по
@@ -546,7 +585,7 @@ function startDsh() {
   const rotated = rotateLog(LOG_FILE);
   if (rotated) console.log(`[launcher] лог прокручен: dsh.log (${rotated} Б) -> dsh.log.1`);
   fs.mkdirSync(LOG_DIR, { recursive: true });
-  const logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
+  const logStream = openDshLog(LOG_FILE);
   authUrl = null; // токен прошлого процесса недействителен — ждём новый
   console.log(`[launcher] starting: ${DSH_BIN} ${DSH_ARGS.join(' ')} (cwd=${CWD}, log=${LOG_FILE})`);
   dshProc = spawn(DSH_BIN, DSH_ARGS, {
