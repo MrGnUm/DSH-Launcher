@@ -97,10 +97,23 @@ class Launcher:
         return wait_exit(self.pid, timeout)
 
     def successor(self, timeout=20):
-        """Новый экземпляр после самообновления (другой pid) или None."""
+        """Новый экземпляр после перезапуска (другой pid) или None. Каждый опрос —
+        заново и только живые: прежний экземпляр, пока завершается, ещё виден
+        в списке процессов. Набор должен совпасть два опроса подряд; из
+        нескольких — самый новый (наибольший pid)."""
+        last = []
         found = []
-        wait_for(lambda: found.extend(p for p in launcher_pids() if p != self.pid) or found, timeout)
-        return found[0] if found else None
+
+        def stable():
+            now = sorted(p for p in launcher_pids() if p != self.pid and alive(p))
+            ok = bool(now) and now == last
+            last[:] = now
+            if ok:
+                found[:] = now
+            return ok
+
+        wait_for(stable, timeout)
+        return found[-1] if found else None
 
     def last_context_menu(self):
         """Последняя строка «контекстное меню: …» из лога (что показали по правому клику)."""
