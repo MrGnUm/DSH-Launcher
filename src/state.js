@@ -20,4 +20,5 @@ module.exports = {
   dialogWin: null,           // окно-диалог
   dialogRender: null,        // перерисовка содержимого диалога: (copied) => void
   dialogCopyText: '',        // текст «Скопировать для отчёта»
+  tray: null, // (перенесено при разбиении main.js)
 };
