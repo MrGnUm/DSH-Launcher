@@ -45,7 +45,7 @@ def test_launcher_log_rotate(start, gui):
 def test_log_rotate_while_running(start, gui):
     """Ротация и во время работы, а не только при запуске: на каждый журнал —
     не больше двух файлов (*.log и *.log.1), каждый не больше порога."""
-    max_bytes = 3000
+    max_bytes = 800  # за сеанс лаунчер пишет ~2 КБ — журнал лаунчера тоже прокрутится
     launcher = start(FAKE, NOUPD, DSH_LAUNCHER_LOG_MAX_BYTES=str(max_bytes), FAKE_SPAM_LINES='500')
     gui.wait()
     assert wait_for(lambda: 'spam line 00499' in read(f'{STATE}/dsh.log'), 30), 'dsh допечатал'
