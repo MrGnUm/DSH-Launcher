@@ -20,7 +20,7 @@ def test_launcher_log(start, gui):
     launcher.term()
 
     text = read(LOG)
-    assert re.search(r'===== DSH Launcher \S+, pid \d+, ', text), 'заголовок запуска'
+    assert re.search(r'===== DeepSeek Harness Launcher \S+, pid \d+, ', text), 'заголовок запуска'
     assert re.search(r'^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d{3} \[launcher\] окно показано$', text, re.M), 'строки со временем'
     assert '[launcher] starting: /opt/t/fakes/fakedsh.py' in text
     assert '[launcher] SIGTERM' in text, 'и остановка'

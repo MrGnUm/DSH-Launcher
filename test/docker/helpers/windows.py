@@ -268,7 +268,7 @@ class UpdateNowDialog(Dialog):
     def __init__(self, drv, kind):
         super().__init__(drv)
         self.kind = kind
-        self.TITLE = '^DSH Launcher update$' if kind == 'launcher' else '^dsh update$'
+        self.TITLE = '^DeepSeek Harness Launcher update$' if kind == 'launcher' else '^dsh update$'
 
     def wait_loaded(self):
         self.wait_text('Update now', 15)

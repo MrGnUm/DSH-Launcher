@@ -219,7 +219,7 @@ function startLauncherLog() {
   }
   let version = '?';
   try { version = require('./package.json').version; } catch { /* noop */ }
-  write(`\n===== DSH Launcher ${version}, pid ${process.pid}, ${new Date().toISOString()} =====\n`);
+  write(`\n===== DeepSeek Harness Launcher ${version}, pid ${process.pid}, ${new Date().toISOString()} =====\n`);
   if (rotated) console.log(`[launcher] лог прокручен: launcher.log (${rotated} Б) -> launcher.log.1`);
 }
 startLauncherLog();
@@ -1741,7 +1741,7 @@ function showUpdatePage(note, noteIsError = false) {
   if (mode === 'running') {
     title = kind === 'dsh'
       ? tr('Обновление DeepSeek Harness…', 'Updating DeepSeek Harness…')
-      : tr('Обновление DSH Launcher…', 'Updating DSH Launcher…');
+      : tr('Обновление DeepSeek Harness Launcher…', 'Updating DeepSeek Harness Launcher…');
     body = `
       ${noteHtml}
       <p>${tr('Выполняю', 'Running')} <code>${esc(updateState.cmdLine || '')}</code></p>
@@ -1779,7 +1779,7 @@ function showUpdatePage(note, noteIsError = false) {
     // ask
     title = kind === 'dsh'
       ? tr('Обновить DeepSeek Harness?', 'Update DeepSeek Harness?')
-      : tr('Обновить DSH Launcher?', 'Update DSH Launcher?');
+      : tr('Обновить DeepSeek Harness Launcher?', 'Update DeepSeek Harness Launcher?');
     body = `
       ${noteHtml}
       <p>${tr(
@@ -2268,7 +2268,7 @@ function appMenuTemplate() {
     {
       label: tr('Справка', 'Help'),
       submenu: [
-        ...upd('launcher', 'DSH Launcher'),
+        ...upd('launcher', 'DeepSeek Harness Launcher'),
         ...upd('dsh', 'dsh'),
         ...(availableUpdates.launcher || availableUpdates.dsh ? [{ type: 'separator' }] : []),
         { label: tr('Проверить обновления…', 'Check for updates…'), click: () => { void showUpdateCheckDialog(); } },
@@ -2830,7 +2830,7 @@ async function maybeShowWhatsNew() {
   dialogCopyText = '';
   const link = `https://github.com/${UPDATE_GITHUB_REPO}/releases`;
   dialogShow(gen, () => dialogPage(title, `
-    <p style="margin:0 0 4px">${tr('DSH Launcher обновлён:', 'DSH Launcher was updated:')} <code>${esc(last)}</code> → <code>${esc(current)}</code></p>
+    <p style="margin:0 0 4px">${tr('DeepSeek Harness Launcher обновлён:', 'DeepSeek Harness Launcher was updated:')} <code>${esc(last)}</code> → <code>${esc(current)}</code></p>
     ${notesBlockHtml(items) || `<p>${tr('Подробности — на', 'Details are on the')} <a href="${esc(link)}" target="_blank">${tr('странице релизов', 'releases page')}</a>.</p>`}
     <div class="actions">${dialogCloseButton()}</div>`));
 }
@@ -2909,7 +2909,7 @@ function langSetting() {
 
 function updateDismissals() {
   const p = updatePrefs();
-  return Object.keys(p).filter((k) => p[k]).map((k) => `${k === 'launcher' ? 'DSH Launcher' : 'dsh'} ${p[k]}`);
+  return Object.keys(p).filter((k) => p[k]).map((k) => `${k === 'launcher' ? 'DeepSeek Harness Launcher' : 'dsh'} ${p[k]}`);
 }
 
 let settingsNote = null; // { text, error }
@@ -3170,7 +3170,7 @@ async function showAboutDialog() {
     const lDisp = ver.loaded ? (ver.lver || tr('неизвестно', 'unknown')) : tr('загружаю…', 'loading…');
     const dDisp = ver.loaded ? (ver.dver || tr('не установлен', 'not installed')) : tr('загружаю…', 'loading…');
     const rows = [
-      ['DSH Launcher', lDisp + lLabel],
+      ['DeepSeek Harness Launcher', lDisp + lLabel],
       [tr('бэкенд dsh', 'dsh backend'), dDisp],
       [tr('путь к dsh', 'path to dsh'), DSH_BIN || '—'],
       ['Node.js', 'v' + process.versions.node],
@@ -3248,14 +3248,14 @@ async function showUpdateCheckDialog() {
       '</td></tr>';
     const body = `
       <table style="border-collapse:collapse; margin-bottom:14px">
-        ${row('DSH Launcher', lver, lStatus)}
+        ${row('DeepSeek Harness Launcher', lver, lStatus)}
         ${row(tr('бэкенд dsh', 'dsh backend'), dver, dStatus)}
       </table>
       ${lSt === 'available' ? notesBlockHtml(notesBetween(latestL.releases, lver, latestL.version, isSrc ? 'semver' : 'deb')) : ''}
       ${canL || canD ? '<p class="hint">' + tr('«Обновить» перезапустит лаунчер, dsh будет остановлен — незаконченный ответ агента прервётся.',
         '“Update” restarts the launcher and stops dsh — an unfinished agent reply will be interrupted.') + '</p>' : ''}
       <div class="actions">
-        ${canL ? `<button onclick="location.href='dshlauncher://update-now/?k=launcher'">${tr('Обновить DSH Launcher', 'Update DSH Launcher')}</button>` : ''}
+        ${canL ? `<button onclick="location.href='dshlauncher://update-now/?k=launcher'">${tr('Обновить DeepSeek Harness Launcher', 'Update DeepSeek Harness Launcher')}</button>` : ''}
         ${canD ? `<button onclick="location.href='dshlauncher://update-now/?k=dsh'">${tr('Обновить dsh', 'Update dsh')}</button>` : ''}
         ${dialogCloseButton()}
       </div>`;
@@ -3300,7 +3300,7 @@ const UPDATE_POLL_MS = updatePollMs(process.env);
 let availableUpdates = {};      // kind → { version, installed, releases? }
 const notifiedUpdates = {};     // kind → версия, о которой уже уведомили
 
-const updateName = (kind) => (kind === 'launcher' ? 'DSH Launcher' : 'dsh');
+const updateName = (kind) => (kind === 'launcher' ? 'DeepSeek Harness Launcher' : 'dsh');
 
 // checks — ответы проверки при запуске (updateChecks), иначе — запросить заново.
 async function findUpdates(checks) {
@@ -3375,7 +3375,7 @@ async function pollUpdates() {
 // Плашка «Доступна … X» в правом верхнем углу окна, поверх страницы dsh (как
 // панель поиска — WebContentsView; под ней, если поиск открыт). Висит, пока
 // не закроют: пользователь мог отойти. «Подробнее…» — окно «Обновить … до X…».
-const TOAST_W = 400;
+const TOAST_W = 460;
 const TOAST_H = 58;
 let toastView = null;
 let toastResizeHooked = false;

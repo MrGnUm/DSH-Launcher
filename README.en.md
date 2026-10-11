@@ -1,6 +1,6 @@
-<p align="center"><img src="icon.png" width="128" alt="DSH Launcher"></p>
+<p align="center"><img src="icon.png" width="128" alt="DeepSeek Harness Launcher"></p>
 
-# DSH Launcher
+# DeepSeek Harness Launcher
 
 [Русский](README.md) | **English**
 

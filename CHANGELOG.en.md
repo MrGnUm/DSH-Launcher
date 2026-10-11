@@ -9,6 +9,10 @@ The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
 
 ### Changed
 
+- **Full name — DeepSeek Harness Launcher** instead of “DSH Launcher” in
+  windows, menus, the update notice and README. The `dsh-launcher` package,
+  command and settings/log folders stay the same: updates and settings are
+  unaffected.
 - **A new release is seen at once.** Within an hour of a check the launcher
   used to take the release list from its cache and miss a just-published
   version. Now every check asks GitHub “has it changed” (by ETag): a 304

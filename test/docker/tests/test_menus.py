@@ -29,7 +29,7 @@ def test_menu_about(launched, gui):
     (1.3.0 падал на «О программе» после проверки обновлений)."""
     for attempt in (1, 2, 3):
         about = gui.open_about()
-        assert about.value('DSH Launcher') == INSTALLED, f'#{attempt}: версия лаунчера'
+        assert about.value('DeepSeek Harness Launcher') == INSTALLED, f'#{attempt}: версия лаунчера'
         assert about.value('dsh backend') == '0.2.0-rc.2', f'#{attempt}: версия dsh'
         assert gui.not_reloaded(), f'#{attempt}: GUI dsh под окном не перезагружался'
         assert gui.dimmed(), f'#{attempt}: GUI dsh под окном затемнён'
@@ -48,7 +48,7 @@ def test_update_check_dialog(launched, gui):
     """«Проверить обновления» — оба компонента актуальны."""
     check = gui.open_update_check()
 
-    assert 'up to date' in check.status('DSH Launcher'), check.rows()
+    assert 'up to date' in check.status('DeepSeek Harness Launcher'), check.rows()
     assert 'up to date' in check.status('dsh backend'), check.rows()
     assert gui.not_reloaded(), 'GUI dsh под окном не перезагружался'
     check.close()
@@ -74,13 +74,13 @@ def test_update_available(start, gui, prompt):
     """«Проверить обновления», когда новая версия есть: статус «доступна» и
     «Что нового» в окне. (Вопрос при старте — «Не сейчас».)"""
     launcher = start(FAKE)
-    prompt.wait('Update DSH Launcher')
+    prompt.wait('Update DeepSeek Harness Launcher')
     prompt.later()
     gui.wait()
 
     check = gui.open_update_check()
 
-    assert f'version {LATEST} is available' in check.status('DSH Launcher'), check.rows()
+    assert f'version {LATEST} is available' in check.status('DeepSeek Harness Launcher'), check.rows()
     check.wait_text(rf'What.s new: {LATEST_RE} ', 5)
     check.close()
     launcher.term()

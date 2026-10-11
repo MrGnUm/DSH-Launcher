@@ -165,9 +165,9 @@ assert.ok(/win\.webContents\.on\('context-menu',\s*\(_e, params\) => showContext
   {
     const upd = mk((r) => r, true, { launcher: { version: '1.8.0' }, dsh: { version: '0.3.0' } });
     assert.deepStrictEqual(labels(upd[3]).slice(0, 4),
-      ['Обновить DSH Launcher до 1.8.0…', 'Обновить dsh до 0.3.0…', '|', 'Проверить обновления…'], '«Справка» с обновлениями');
+      ['Обновить DeepSeek Harness Launcher до 1.8.0…', 'Обновить dsh до 0.3.0…', '|', 'Проверить обновления…'], '«Справка» с обновлениями');
     calls.length = 0;
-    item(upd[3], 'Обновить DSH Launcher до 1.8.0…').click();
+    item(upd[3], 'Обновить DeepSeek Harness Launcher до 1.8.0…').click();
     item(upd[3], 'Обновить dsh до 0.3.0…').click();
     assert.deepStrictEqual(calls, ['update:launcher', 'update:dsh'], 'пункт → окно «Обновить сейчас»');
     const onlyDsh = mk((r, e) => e, true, { dsh: { version: '0.3.0' } });

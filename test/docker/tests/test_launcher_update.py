@@ -28,7 +28,7 @@ def test_launcher_update(start, prompt):
     """Вопрос с «Что нового» → «Обновить» → скачано, sha256 сверен, pkexec
     поставил пакет, лаунчер перезапустился в новую версию."""
     launcher = start(FAKE)
-    prompt.wait(rf'Update DSH Launcher.*Version {LATEST_RE} is available \(installed: {re.escape(INSTALLED)}\s*\)')
+    prompt.wait(rf'Update DeepSeek Harness Launcher.*Version {LATEST_RE} is available \(installed: {re.escape(INSTALLED)}\s*\)')
     # «Что нового»: от последней версии вниз до 1.1.1 (первая после 1.1.0)
     prompt.wait(rf'What.s new: {LATEST_RE} .*1\.1\.1 ', 5)
     page_url = prompt.url()
@@ -50,7 +50,7 @@ def test_launcher_update_denied(start, prompt):
     """polkit отказал — команда для терминала; пользователь ставит пакет сам,
     «Проверить ещё раз» видит новую версию и перезапускает лаунчер."""
     launcher = start(FAKE)
-    prompt.wait('Update DSH Launcher')
+    prompt.wait('Update DeepSeek Harness Launcher')
 
     prompt.install()
 
@@ -66,7 +66,7 @@ def test_launcher_update_nopkexec(start, prompt):
     """pkexec нет — сразу команда для терминала; «Не сейчас» — dsh запускается."""
     shutil.move('/usr/bin/pkexec', '/usr/bin/pkexec.off')
     launcher = start(FAKE)
-    prompt.wait('Update DSH Launcher')
+    prompt.wait('Update DeepSeek Harness Launcher')
 
     prompt.install()
 
