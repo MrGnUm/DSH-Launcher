@@ -50,11 +50,29 @@ const {
 } = require('./src/env');
 const { rotateLog, startLauncherLog, openDshLog } = require('./src/log');
 startLauncherLog();
+const { loadWindowState, trackWindowState } = require('./src/window-state');
+const { dshEnv, probeDsh, findBin, dshInstallCheck, MIN_NODE_MAJOR, npmInstallInfo } = require('./src/dsh-install');
+const { killGroup, dshLeaderExited, stopDsh, adoptedTargets, stopAdoptedDsh } = require('./src/dsh-stop');
+const { checkPreviousRun, clearRunMarker, maybeShowCrashNotice, saveReport } = require('./src/diagnostics');
 const { closeToTrayOn, attentionOn, attentionSoundOn, trayMenu, setTray, setTrayAttention, showMainWindow, onMainWindowClose, AGENT_POLL_MS, playAgentSound, pollAgentState } = require('./src/tray');
 // ---- реестр launcher: имена, нужные модулям (генерируется) ----
 const launcher = require('./src/launcher');
 Object.defineProperties(launcher, {
+  UI_LANG: { get: () => UI_LANG, enumerable: true },
+  UPDATE_GITHUB_REPO: { get: () => UPDATE_GITHUB_REPO, enumerable: true },
+  dialogCloseButton: { get: () => dialogCloseButton, enumerable: true },
+  dialogPage: { get: () => dialogPage, enumerable: true },
+  dialogShow: { get: () => dialogShow, enumerable: true },
+  dshVersionRaw: { get: () => dshVersionRaw, enumerable: true },
+  gpuStatusNow: { get: () => gpuStatusNow, enumerable: true },
+  gpuStatusText: { get: () => gpuStatusText, enumerable: true },
+  launcherVersionRaw: { get: () => launcherVersionRaw, enumerable: true },
+  logTail: { get: () => logTail, enumerable: true },
+  openDialog: { get: () => openDialog, enumerable: true },
   restartDsh: { get: () => restartDsh, enumerable: true },
+  showToast: { get: () => showToast, enumerable: true },
+  sleep: { get: () => sleep, enumerable: true },
+  toastPageUrl: { get: () => toastPageUrl, enumerable: true },
 });
 // ---- конец реестра ----
 
@@ -220,150 +238,6 @@ async function waitForAuthUrl(timeoutMs = 20000) {
   return state.authUrl;
 }
 
-/* ---------------- проверка установки dsh ---------------- */
-
-// Окружение для запуска dsh: каталог бинарника — первым в PATH. dsh — это
-// `#!/usr/bin/env node`-скрипт; установленный через nvm, он должен получить
-// node из того же каталога, а при запуске с ярлыка nvm в PATH нет.
-function dshEnv(extra) {
-  return envWithBinDir(state.dshBin, extra);
-}
-
-
-
-async function probeDsh(bin) {
-  if (!bin || !fs.existsSync(bin)) return { ok: false, reason: 'missing' };
-  try {
-    const { stdout: out } = await execFileAsync(bin, ['--version'], { encoding: 'utf8', timeout: 8000, env: envWithBinDir(bin) });
-    return { ok: true, version: (out.trim().split('\n').pop() || '').trim() };
-  } catch (e) {
-    const detail = firstErrLine(e.stderr || e.message);
-    return { ok: false, reason: 'broken', detail };
-  }
-}
-
-const dshBinPrefFile = () => path.join(app.getPath('userData'), 'dsh-bin.json');
-
-// bin-каталоги всех версий node из nvm, свежие первыми.
-function nvmBinDirs() {
-  const nvmDir = process.env.NVM_DIR || path.join(os.homedir(), '.nvm');
-  try {
-    return fs.readdirSync(path.join(nvmDir, 'versions', 'node'))
-      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
-      .map((v) => path.join(nvmDir, 'versions', 'node', v, 'bin'));
-  } catch { return []; } // nvm нет
-}
-
-// Окружение с каталогом бинарника первым в PATH (для `#!/usr/bin/env node`-скриптов).
-
-
-// Исполняемый файл: рядом с dsh, в PATH, иначе в nvm (при запуске с ярлыка
-// nvm в PATH нет).
-function findBin(name) {
-  const dirs = [path.dirname(state.dshBin)]
-    .concat(String(process.env.PATH || '').split(path.delimiter).filter(Boolean), nvmBinDirs());
-  for (const dir of dirs) {
-    const bin = path.join(dir, name);
-    try { fs.accessSync(bin, fs.constants.X_OK); return bin; } catch { /* дальше */ }
-  }
-  return null;
-}
-const findNpm = () => findBin('npm');
-
-// Где искать dsh, если DSH_BIN не задан: запомненный путь, /usr/bin/dsh,
-// PATH, типичные каталоги пользовательских npm-установок, все версии nvm
-// (свежие первыми). npm prefix -g — последним, он медленный.
-function dshCandidates() {
-  const home = os.homedir();
-  const list = [];
-  try { list.push(JSON.parse(fs.readFileSync(dshBinPrefFile(), 'utf8')).bin); } catch { /* не запоминали */ }
-  list.push(DSH_BIN_DEFAULT);
-  for (const dir of String(process.env.PATH || '').split(path.delimiter)) if (dir) list.push(path.join(dir, 'dsh'));
-  list.push(path.join(home, '.npm-global', 'bin', 'dsh'), path.join(home, '.local', 'bin', 'dsh'), '/usr/local/bin/dsh');
-  for (const dir of nvmBinDirs()) list.push(path.join(dir, 'dsh'));
-  return [...new Set(list.filter(Boolean))];
-}
-
-// Проверяем не только наличие файла, но и что бинарник реально запускается:
-// битый symlink, несовместимый Node или отсутствующий npm дадут ошибку здесь,
-// а не загадочным ENOENT в момент старта. dsh --version занимает ~60 мс.
-// Асинхронно: при медленной системе синхронный вызов замораживал бы окно.
-// Если DSH_BIN не задан явно — перебираем кандидатов (dshCandidates) и
-// переключаем DSH_BIN на первый рабочий, запоминая его в userData/dsh-bin.json.
-async function dshInstallCheck() {
-  if (DSH_BIN_EXPLICIT) return probeDsh(state.dshBin);
-  let firstBroken = null;
-  const tryBin = async (bin) => {
-    const r = await probeDsh(bin);
-    if (r.ok) {
-      if (bin !== state.dshBin) console.log(`[launcher] dsh найден: ${bin} (${r.version})`);
-      state.dshBin = bin;
-      try {
-        fs.mkdirSync(path.dirname(dshBinPrefFile()), { recursive: true });
-        fs.writeFileSync(dshBinPrefFile(), JSON.stringify({ bin }));
-      } catch (e) { console.error('[launcher] dsh-bin.json:', e.message); }
-    } else if (r.reason === 'broken' && !firstBroken) {
-      firstBroken = { ...r, bin };
-    }
-    return r.ok ? r : null;
-  };
-  for (const bin of dshCandidates()) {
-    const r = await tryBin(bin);
-    if (r) return r;
-  }
-  const npm = findNpm();
-  if (npm) {
-    try {
-      const prefix = (await execFileAsync(npm, ['prefix', '-g'], { encoding: 'utf8', timeout: 10000, env: envWithBinDir(npm) })).stdout.trim();
-      const r = await tryBin(path.join(prefix, 'bin', 'dsh'));
-      if (r) return r;
-    } catch { /* npm не отвечает */ }
-  }
-  if (firstBroken) {
-    state.dshBin = firstBroken.bin; // показываем на странице тот, что сломан
-    return { ok: false, reason: 'broken', detail: firstBroken.detail };
-  }
-  state.dshBin = DSH_BIN_DEFAULT;
-  return { ok: false, reason: 'missing' };
-}
-
-// Есть ли npm и доступен ли глобальный prefix без sudo — от этого зависит,
-// можно ли ставить dsh кнопкой прямо из окна.
-const INSTALL_CMD = 'npm install -g @deepseek-ai/dsh';
-// Право записи проверяем у ближайшего существующего каталога: на чистой
-// системе <prefix>/lib/node_modules ещё нет (появится при первой глобальной
-// установке), и ENOENT от него раньше ошибочно означал «npm нет».
-
-
-// dsh нужен Node.js 22+. npm ставит его и на более старый Node без единого
-// предупреждения (Ubuntu 24.04: Node 18 из apt), а потом dsh не запускается.
-const MIN_NODE_MAJOR = 22;
-
-async function nodeVersionNear(npm) {
-  try {
-    const { stdout } = await execFileAsync('node', ['--version'], { encoding: 'utf8', timeout: 5000, env: envWithBinDir(npm) });
-    return stdout.trim();
-  } catch { return null; }
-}
-
-async function npmInstallInfo() {
-  const npm = findNpm();
-  if (!npm) return { hasNpm: false, canAuto: false, command: INSTALL_CMD };
-  const nodeVersion = await nodeVersionNear(npm);
-  const major = Number((/^v(\d+)/.exec(nodeVersion || '') || [])[1]);
-  const nodeOld = Number.isFinite(major) && major < MIN_NODE_MAJOR;
-  try {
-    const prefix = (await execFileAsync(npm, ['prefix', '-g'], { encoding: 'utf8', timeout: 10000, env: envWithBinDir(npm) })).stdout.trim();
-    const writable = writableOrCreatable(path.join(prefix, 'lib', 'node_modules')) &&
-      writableOrCreatable(path.join(prefix, 'bin'));
-    return { hasNpm: true, canAuto: writable && !nodeOld, nodeVersion, nodeOld, npm, prefix,
-      command: writable ? INSTALL_CMD : 'sudo ' + INSTALL_CMD };
-  } catch (e) {
-    console.error('[launcher] npm prefix -g:', e.message);
-    return { hasNpm: true, canAuto: false, nodeVersion, nodeOld, npm, command: 'sudo ' + INSTALL_CMD };
-  }
-}
-
 /* ---------------- запуск процесса dsh ---------------- */
 
 // Chromium держит часть своих дескрипторов (разделяемая память, сокеты,
@@ -433,74 +307,6 @@ function startDsh() {
     }
     handleDshExit(code, signal);
   });
-}
-
-/* ---------------- остановка дерева процессов ---------------- */
-
-// groupOnly: главный процесс уже завершился — его pid мог занять чужой
-// процесс, поэтому без запасного варианта «просто pid», только группа (-pid).
-function killGroup(pid, signal, groupOnly = false) {
-  try { process.kill(-pid, signal); } catch {
-    if (groupOnly) return;
-    try { process.kill(pid, signal); } catch { /* noop */ }
-  }
-}
-
-
-
-// Главный процесс dsh завершился (по коду или по сигналу).
-function dshLeaderExited() {
-  return state.dshProc.exitCode !== null || state.dshProc.signalCode !== null;
-}
-
-async function stopDsh() {
-  if (!state.weStartedDsh || !state.dshProc || state.dshProc.pid === undefined) return;
-  const pid = state.dshProc.pid;
-  if (state.dshFatal) return; // spawn не удался — процесса не было
-  const groupOnly = dshLeaderExited();
-  if (!groupAlive(pid, groupOnly)) return; // группа уже мёртва — нечего убивать
-  killGroup(pid, 'SIGTERM', groupOnly);
-  for (let i = 0; i < 40 && groupAlive(pid, groupOnly); i++) await sleep(100); // до 4 с
-  if (groupAlive(pid, groupOnly)) {
-    killGroup(pid, 'SIGKILL');
-    for (let i = 0; i < 20 && groupAlive(pid); i++) await sleep(100);
-  }
-  console.log('[launcher] dsh stopped by launcher');
-}
-
-// pid процесса, слушающего порт (Linux, чистый fs — без fuser/ss):
-// inode сокетов LISTEN берём из /proc/net/tcp{,6}, затем ищем fd
-// socket:[inode] среди /proc/[pid]/fd/*.
-
-
-// pgid процесса: поле 5 из /proc/<pid>/stat (comm в скобках может содержать
-// пробелы — считаем от последней «)»).
-
-
-// Что убивать у «усыновлённого» dsh (после самовозрождения). Ручки на новый
-// процесс у нас нет, поэтому:
-//  - процесс на порту: убиваем его группу по pgid — он может быть не лидером
-//    группы, и тогда kill(-pid) не сработал бы, а потомки остались бы жить;
-//  - группа исходного dsh: в ней могли остаться его потомки (лидер мёртв —
-//    только группа, без запасного варианта по pid).
-
-
-function adoptedTargets() {
-  const pid = portListenerPid(PORT);
-  return pickKillTargets(pid, pid ? pgidOf(pid) : null, pgidOf(process.pid), state.adoptedOldPgid);
-}
-
-async function stopAdoptedDsh() {
-  const targets = adoptedTargets().filter((t) => groupAlive(t.id, t.groupOnly));
-  if (targets.length === 0) {
-    console.log('[launcher] усыновлённый dsh: живых процессов не найдено — не убиваем (порт уже закрыт?)');
-    return;
-  }
-  console.log(`[launcher] останавливаю усыновлённый dsh (${targets.map((t) => (t.groupOnly ? 'pgid=' : 'pid=') + t.id).join(', ')})`);
-  const alive = () => targets.filter((t) => groupAlive(t.id, t.groupOnly));
-  for (const t of targets) killGroup(t.id, 'SIGTERM', t.groupOnly);
-  for (let i = 0; i < 20 && alive().length; i++) await sleep(100); // до 2 с
-  for (const t of alive()) killGroup(t.id, 'SIGKILL', t.groupOnly);
 }
 
 /* ---------------- самовозрождение dsh (self-restart) ----------------
@@ -1934,41 +1740,6 @@ async function dshVersionRaw() {
   return null;
 }
 
-/* ---------------- размер окна между запусками ---------------- */
-
-// Запоминаем размер и «развёрнуто» (позицию не трогаем: на Wayland её
-// выбирает композитор). Полноэкранный режим не сохраняем.
-const windowStateFile = () => path.join(app.getPath('userData'), 'window-state.json');
-
-function loadWindowState() {
-  try { return JSON.parse(fs.readFileSync(windowStateFile(), 'utf8')); } catch { return null; }
-}
-
-
-
-function trackWindowState(w) {
-  // Последнее известное состояние — в памяти: при закрытии из страницы
-  // (window.close()) Electron не шлёт 'close', и окно уже не спросить;
-  // 'closed' же приходит всегда — тогда и пишем.
-  let last = null;
-  let timer = null;
-  const snapshot = () => {
-    if (w.isDestroyed() || w.isFullScreen()) return;
-    const b = w.getNormalBounds(); // размер «не развёрнутого» окна
-    last = { width: b.width, height: b.height, maximized: w.isMaximized() };
-  };
-  const write = () => {
-    if (!last) return;
-    try { fs.writeFileSync(windowStateFile(), JSON.stringify(last)); } catch { /* noop */ }
-  };
-  const later = () => { snapshot(); clearTimeout(timer); timer = setTimeout(write, 500); };
-  w.once('ready-to-show', snapshot);
-  w.once('show', snapshot); // Wayland: ready-to-show может не прийти — окно показывают по таймеру
-  for (const ev of ['resize', 'maximize', 'unmaximize']) w.on(ev, later);
-  w.on('close', snapshot); // крестик / «Выйти» — самые свежие размеры
-  w.on('closed', () => { clearTimeout(timer); write(); });
-}
-
 /* ---------------- «Вид»: перезагрузка, масштаб, поиск, полный экран ---------------- */
 
 // Действия доступны и из меню «Вид», и с клавиатуры (keyAction). Масштаб
@@ -2954,157 +2725,6 @@ function updateNow(kind) {
 
 
 
-/* ---------------- прошлый запуск: завершился ли штатно ---------------- */
-
-// При запуске — метка running.json (pid, время, версия), при штатном выходе
-// (will-quit) — удаляется. Осталась, а процесса нет — прошлый запуск
-// завершился аварийно (падение, kill -9, выключение питания): плашка с
-// «Журнал…» и «Сохранить отчёт…».
-const runMarkerFile = () => path.join(app.getPath('userData'), 'running.json');
-let previousCrash = null;
-
-// Прежний экземпляр ещё работает: процесс есть, не «зомби» (завершился, но
-// родитель не забрал код выхода) и это лаунчер — pid мог достаться другой
-// программе.
-function launcherPidAlive(pid) {
-  try {
-    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
-    const st = stat.slice(stat.lastIndexOf(')') + 2, stat.lastIndexOf(')') + 3);
-    if (st === 'Z' || st === 'X') return false;
-    return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes(process.execPath);
-  } catch { return false; } // процесса нет
-}
-
-function checkPreviousRun() {
-  try {
-    const m = JSON.parse(fs.readFileSync(runMarkerFile(), 'utf8'));
-    if (Number.isInteger(m.pid) && m.pid !== process.pid && !launcherPidAlive(m.pid)) {
-      previousCrash = m;
-      console.log(`[launcher] прошлый запуск (pid ${m.pid}, ${m.version || '?'}, начат ${m.startedAt || '?'}) завершился аварийно`);
-    }
-  } catch { /* метки нет — прошлый завершился штатно (или первый запуск) */ }
-  try {
-    fs.mkdirSync(path.dirname(runMarkerFile()), { recursive: true });
-    let version = null;
-    try { version = require('./package.json').version; } catch { /* noop */ }
-    fs.writeFileSync(runMarkerFile(), JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), version }));
-  } catch (e) { console.error('[launcher] running.json:', e.message); }
-}
-
-function clearRunMarker() {
-  try { fs.unlinkSync(runMarkerFile()); } catch { /* noop */ }
-}
-
-function maybeShowCrashNotice() {
-  if (!previousCrash) return;
-  const m = previousCrash;
-  previousCrash = null; // один раз
-  console.log('[launcher] уведомление: прошлый запуск завершился аварийно');
-  let when = '';
-  try { when = new Date(m.startedAt).toLocaleString(UI_LANG === 'ru' ? 'ru-RU' : 'en-US'); } catch { /* noop */ }
-  showToast(toastPageUrl({
-    title: tr('В прошлый раз лаунчер завершился аварийно', 'The launcher closed unexpectedly last time'),
-    sub: when ? tr(`запуск от ${when}`, `started ${when}`) : '',
-    buttons: [
-      { label: tr('Журнал…', 'Log…'), href: 'dshlauncher://toast/crash-log/' },
-      { label: tr('Сохранить отчёт…', 'Save report…'), href: 'dshlauncher://toast/report/' },
-    ],
-  }));
-}
-
-/* ---------------- отчёт для поддержки ---------------- */
-
-// «Справка → Сохранить отчёт…»: архив .tar.gz — сведения о системе и
-// версиях, журнал лаунчера, хвост журнала dsh, настройки; токены и ключи
-// скрыты (redactLog). DSH_LAUNCHER_REPORT_PATH — куда сохранить без диалога
-// (тесты).
-let lastReportPath = null;
-
-async function reportFacts() {
-  const [lver, dver] = await Promise.all([launcherVersionRaw(), dshVersionRaw()]);
-  let osName = '';
-  try { osName = (/^PRETTY_NAME="?([^"\n]*)/m.exec(fs.readFileSync('/etc/os-release', 'utf8')) || [])[1] || ''; } catch { /* noop */ }
-  return [
-    ['DeepSeek Harness Launcher', lver],
-    [tr('бэкенд dsh', 'dsh backend'), dver],
-    ['Electron', process.versions.electron],
-    ['Chromium', process.versions.chrome],
-    ['Node.js', process.versions.node],
-    [tr('ОС', 'OS'), osName],
-    [tr('ядро', 'kernel'), `${os.release()} (${os.arch()})`],
-    [tr('рабочий стол', 'desktop'), process.env.XDG_CURRENT_DESKTOP],
-    [tr('сессия', 'session'), process.env.XDG_SESSION_TYPE],
-    [tr('режим окна', 'window mode'), app.commandLine.getSwitchValue('ozone-platform') || 'x11'],
-    [tr('GPU-ускорение', 'GPU acceleration'), gpuStatusText(gpuStatusNow())],
-    [tr('язык окна', 'window language'), UI_LANG],
-    [tr('путь к dsh', 'path to dsh'), state.dshBin],
-    [tr('аргументы dsh', 'dsh arguments'), DSH_ARGS.join(' ')],
-    [tr('рабочая папка', 'working folder'), CWD],
-    [tr('порт', 'port'), PORT],
-    [tr('откуда настройки', 'settings source'), Object.entries(CONFIG.src).map(([k, v]) => `${k}=${v}`).join(', ')],
-    [tr('лаунчер работает', 'launcher uptime'), `${Math.round(process.uptime())} s`],
-    [tr('отчёт создан', 'report created'), new Date().toISOString()],
-  ];
-}
-
-async function saveReport() {
-  let dest = process.env.DSH_LAUNCHER_REPORT_PATH || null;
-  if (!dest) {
-    const parent = state.dialogWin && !state.dialogWin.isDestroyed() ? state.dialogWin : state.win;
-    let dir = os.homedir();
-    try { dir = app.getPath('downloads'); } catch { /* noop */ }
-    const r = await dialog.showSaveDialog(parent, {
-      title: tr('Сохранить отчёт', 'Save report'),
-      defaultPath: path.join(dir, reportFileName(new Date())),
-      filters: [{ name: 'tar.gz', extensions: ['gz'] }],
-    });
-    if (r.canceled || !r.filePath) return;
-    dest = r.filePath;
-  }
-  let tmp = null;
-  try {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-launcher-report-'));
-    const dir = path.join(tmp, 'dsh-launcher-report');
-    fs.mkdirSync(dir);
-    const put = (name, text) => fs.writeFileSync(path.join(dir, name), redactLog(text));
-    put('info.txt', reportInfoText(await reportFacts()));
-    for (const f of [LAUNCHER_LOG_FILE + '.1', LAUNCHER_LOG_FILE]) {
-      try { put(path.basename(f), fs.readFileSync(f, 'utf8')); } catch { /* нет файла */ }
-    }
-    const dshTail = logTail(LOG_FILE, 5000, 1024 * 1024);
-    if (dshTail !== null) put('dsh.log.tail', dshTail + '\n');
-    put('settings.json', JSON.stringify(loadSettings() || {}, null, 2) + '\n');
-    try { put('gpu.json', JSON.stringify(app.getGPUFeatureStatus(), null, 2) + '\n'); } catch { /* noop */ }
-    await execFileAsync('tar', ['-czf', dest, '-C', tmp, 'dsh-launcher-report']);
-    lastReportPath = dest;
-    console.log(`[launcher] отчёт сохранён: ${dest}`);
-    showReportDialog(null);
-  } catch (e) {
-    console.error('[launcher] отчёт:', e.message);
-    showReportDialog(e.message);
-  } finally {
-    if (tmp) try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* noop */ }
-  }
-}
-
-function showReportDialog(error) {
-  const title = tr('Отчёт', 'Report');
-  const gen = openDialog(title);
-  if (gen === null) return;
-  state.dialogCopyText = '';
-  dialogShow(gen, () => dialogPage(title, error
-    ? `<p class="note err">${esc(tr('Не удалось сохранить отчёт: ', 'Could not save the report: ') + error)}</p>
-       <div class="actions">${dialogCloseButton()}</div>`
-    : `<p>${tr('Отчёт сохранён:', 'Report saved:')} <code>${esc(lastReportPath)}</code></p>
-       <p class="hint">${tr('Токены и ключи в нём скрыты. Приложите файл к сообщению о проблеме на',
-                            'Tokens and keys in it are hidden. Attach the file to an issue on')}
-         <a href="https://github.com/${UPDATE_GITHUB_REPO}/issues/new" target="_blank">GitHub</a>.</p>
-       <div class="actions">
-         <button onclick="location.href='dshlauncher://dialog/report-show/'">${tr('Показать в папке', 'Show in folder')}</button>
-         ${dialogCloseButton()}
-       </div>`));
-}
-
 /* ---------------- запуск dsh и доведение окна до GUI ---------------- */
 
 // Защита от повторного запуска: двойной клик «Проверить ещё раз» или
@@ -3464,7 +3084,7 @@ async function onReady() {
       if (route.startsWith('/dialog/logs/')) { void openLogsFolder(); return noContentResponse(); }
       if (route.startsWith('/window/close/')) { if (state.win && !state.win.isDestroyed()) state.win.close(); return noContentResponse(); }
       if (route.startsWith('/menu/report/')) { void saveReport(); return noContentResponse(); }
-      if (route.startsWith('/dialog/report-show/')) { if (lastReportPath) shell.showItemInFolder(lastReportPath); return noContentResponse(); }
+      if (route.startsWith('/dialog/report-show/')) { if (state.lastReportPath) shell.showItemInFolder(state.lastReportPath); return noContentResponse(); }
       if (route.startsWith('/dialog/log-refresh/')) { if (state.dialogRender) state.dialogRender(false); return noContentResponse(); }
       if (route.startsWith('/menu/log/')) { showLogDialog(); return noContentResponse(); }
       if (route.startsWith('/menu/settings/')) { showSettingsDialog(); return noContentResponse(); }
