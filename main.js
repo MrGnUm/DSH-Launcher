@@ -20,7 +20,8 @@
 
 const { app, BrowserWindow, WebContentsView, Menu, protocol, net: electronNet, session, screen, dialog, shell, clipboard } = require('electron');
 const { spawn, execFile, execFileSync } = require('child_process');
-const { promisify } = require('util');
+const util = require('util');
+const { promisify } = util;
 const nodeNet = require('net');
 const http = require('http');
 const https = require('https');
@@ -168,6 +169,49 @@ const START_TIMEOUT = Number(process.env.DSH_START_TIMEOUT_MS || 120000); // с�
 // в dev-режиме — рядом с приложением
 const LOG_DIR = process.env.DSH_LOG_DIR || path.join(__dirname, 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'dsh.log');
+const LAUNCHER_LOG_FILE = path.join(LOG_DIR, 'launcher.log');
+const MAX_LOG_BYTES = 2 * 1024 * 1024; // 2 МБ — дальше файл сдвигается в *.1
+
+// Простая ротация: файл больше MAX_LOG_BYTES — сдвигаем в <файл>.1.
+function rotateLog(file) {
+  try {
+    const st = fs.statSync(file);
+    if (st.size <= MAX_LOG_BYTES) return null;
+    fs.renameSync(file, file + '.1');
+    return st.size;
+  } catch { return null; } // файла ещё нет — ротировать нечего
+}
+
+// Журнал лаунчера (launcher.log): всё, что лаунчер выводит в консоль, — с
+// временем; при запуске с ярлыка консоль никуда не пишется. Строки «[dsh] …»
+// не дублируем — они в dsh.log. Токены скрыты (redactLog). Пишем синхронно:
+// строк немного, а при сбое последние не потеряются.
+function startLauncherLog() {
+  const rotated = rotateLog(LAUNCHER_LOG_FILE);
+  try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch { /* noop */ }
+  let ok = true;
+  const write = (text) => {
+    if (!ok) return;
+    try { fs.appendFileSync(LAUNCHER_LOG_FILE, text); }
+    catch { ok = false; } // нет доступа — журнал без файла, лаунчер работает
+  };
+  for (const level of ['log', 'warn', 'error']) {
+    const orig = console[level].bind(console);
+    console[level] = (...args) => {
+      orig(...args);
+      const text = util.format(...args);
+      if (text.startsWith('[dsh]')) return;
+      const d = new Date();
+      const t = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().replace('T', ' ').slice(0, 23); // местное время
+      write(redactLog(text).split('\n').map((l) => `${t} ${l}`).join('\n') + '\n');
+    };
+  }
+  let version = '?';
+  try { version = require('./package.json').version; } catch { /* noop */ }
+  write(`\n===== DSH Launcher ${version}, pid ${process.pid}, ${new Date().toISOString()} =====\n`);
+  if (rotated) console.log(`[launcher] лог прокручен: launcher.log (${rotated} Б) -> launcher.log.1`);
+}
+startLauncherLog();
 
 // Язык окон лаунчера: DSH_LAUNCHER_LANG=ru|en, иначе выбор переключателем
 // RU | EN в окне (userData/ui-lang.json, подхватывается в onReady), иначе по
@@ -498,16 +542,9 @@ async function npmInstallInfo() {
 /* ---------------- запуск процесса dsh ---------------- */
 
 function startDsh() {
-  // Простая ротация: если dsh.log разросся больше MAX — сдвигаем в dsh.log.1.
-  // Файл пишет только startDsh (stdout dsh), поэтому ротируем перед открытием потока.
-  const MAX_LOG_BYTES = 2 * 1024 * 1024; // 2 МБ
-  try {
-    const st = fs.statSync(LOG_FILE);
-    if (st.size > MAX_LOG_BYTES) {
-      fs.renameSync(LOG_FILE, LOG_FILE + '.1');
-      console.log(`[launcher] лог прокручен: dsh.log (${st.size} Б) -> dsh.log.1`);
-    }
-  } catch { /* файла ещё нет — ротировать нечего */ }
+  // dsh.log пишет только startDsh (stdout dsh) — ротируем перед открытием потока.
+  const rotated = rotateLog(LOG_FILE);
+  if (rotated) console.log(`[launcher] лог прокручен: dsh.log (${rotated} Б) -> dsh.log.1`);
   fs.mkdirSync(LOG_DIR, { recursive: true });
   const logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
   authUrl = null; // токен прошлого процесса недействителен — ждём новый

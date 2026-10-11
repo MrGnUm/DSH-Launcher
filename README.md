@@ -196,7 +196,9 @@ npm start
 своим каталогом в начале `PATH` — так установленный через nvm dsh получает
 «свой» node и при запуске с ярлыка.
 
-Журнал процесса dsh пишется в `logs/dsh.log`.
+Журнал процесса dsh пишется в `logs/dsh.log`, журнал самого лаунчера
+(проверка обновлений, запуск и остановка dsh, ошибки; со временем, токены
+скрыты) — в `logs/launcher.log`. Оба файла после 2 МБ сдвигаются в `*.1`.
 
 ## Клавиши в окне
 
@@ -282,7 +284,8 @@ sandbox Chromium (`chown root:root` + `chmod 4755 chrome-sandbox`); в этом
 случае `run.sh` запускается **без** `--no-sandbox`, а если хелпер не удалось
 настроить — автоматически откатывается на `--no-sandbox`.
 
-Журнал dsh в установленной версии: `~/.local/state/dsh-launcher/dsh.log`.
+Журналы в установленной версии: `~/.local/state/dsh-launcher/dsh.log` (dsh)
+и `launcher.log` (лаунчер) — «Справка → Открыть папку логов».
 
 > **Внимание.** Если раньше вручную ставили ярлык
 > (`~/.local/share/applications/dsh-launcher.desktop` и/или иконку на
@@ -356,7 +359,7 @@ sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
   интерфейса сохраняются на диске (`~/.dsh/.credentials.yaml`,
   `~/.dsh/sessions/`), поэтому разговор восстанавливается без потерь.
 - Окно показывает страницу с ошибкой и последними строками журнала dsh.
-- Полный лог: `logs/dsh.log`.
+- Полный лог: `logs/dsh.log`; что делал лаунчер — `logs/launcher.log`.
 - Проверьте, что в терминале команда `dsh --profile web --no-open`
   поднимается и печатает URL.
 - Куки живёт в профиле Electron (`~/.config/dsh-launcher`); если хотите

@@ -5,6 +5,16 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
 
+## [Unreleased]
+
+### Added
+
+- **Launcher log** `launcher.log` next to `dsh.log`
+  (`~/.local/state/dsh-launcher/`): what the launcher itself did — update
+  checks, starting and stopping dsh, errors; timestamped, tokens hidden,
+  moved to `launcher.log.1` after 2 MB. These messages used to be lost when
+  started from the desktop shortcut.
+
 ## [1.8.1] — 2026-10-11
 
 ### Fixed

@@ -199,7 +199,9 @@ found is remembered in `~/.config/dsh-launcher/dsh-bin.json`. dsh is started
 with its own directory first in `PATH`, so a dsh installed via nvm gets its
 own node even when launched from the desktop shortcut.
 
-The dsh process log is written to `logs/dsh.log`.
+The dsh process log is written to `logs/dsh.log`, the launcher’s own log
+(update checks, starting and stopping dsh, errors; timestamped, tokens
+hidden) to `logs/launcher.log`. Both are moved to `*.1` after 2 MB.
 
 ## Keys in the window
 
@@ -284,7 +286,8 @@ helper (`chown root:root` + `chmod 4755 chrome-sandbox`); in that case
 `run.sh` starts **without** `--no-sandbox`, and if the helper could not be
 set up it automatically falls back to `--no-sandbox`.
 
-dsh log in the installed version: `~/.local/state/dsh-launcher/dsh.log`.
+Logs in the installed version: `~/.local/state/dsh-launcher/dsh.log` (dsh)
+and `launcher.log` (the launcher) — “Help → Open logs folder”.
 
 > **Note.** If you previously installed a shortcut manually
 > (`~/.local/share/applications/dsh-launcher.desktop` and/or a desktop
@@ -359,7 +362,7 @@ and remove `--no-sandbox` from the last line of `run.sh`.
   are stored on disk (`~/.dsh/.credentials.yaml`, `~/.dsh/sessions/`), so
   the conversation is restored without loss.
 - The window shows an error page with the latest lines of the dsh log.
-- Full log: `logs/dsh.log`.
+- Full log: `logs/dsh.log`; what the launcher did — `logs/launcher.log`.
 - Check that `dsh --profile web --no-open` starts in a terminal and
   prints the URL.
 - The cookie lives in the Electron profile (`~/.config/dsh-launcher`); to
