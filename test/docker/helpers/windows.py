@@ -231,6 +231,10 @@ class SettingsDialog(Dialog):
     def disabled(self, element_id):
         return self.drv.eval(f"(document.getElementById({json.dumps(element_id)}) || {{}}).disabled === true", page=self.TITLE)
 
+    def value(self, element_id):
+        """Значение поля окна (текст поля ввода в innerText не попадает)."""
+        return self.drv.eval(f"(document.getElementById({json.dumps(element_id)}) || {{}}).value", page=self.TITLE)
+
     def relaunch(self):
         self.go('dshlauncher://settings/relaunch/')
 

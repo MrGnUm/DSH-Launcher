@@ -5,6 +5,14 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
 
+## [Unreleased]
+
+### Fixed
+
+- **“Restart the launcher”** (Settings window, “Update now”): the new
+  instance starts once the previous one has fully exited — the instances no
+  longer overlap.
+
 ## [1.10.0] — 2026-10-11
 
 ### Changed

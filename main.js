@@ -2965,8 +2965,10 @@ function onSettingsResetUpdates() {
 // Перезапуск лаунчера (применить настройки). Не app.relaunch(): Electron
 // запускает новый экземпляр, пока старый ещё держит блокировку «один
 // экземпляр», и новый тут же закрывается. Поэтому так: before-quit
-// останавливает dsh, затем (relaunchRequested) старый сам отпускает
-// блокировку, запускает новый экземпляр и выходит.
+// останавливает dsh, затем (relaunchRequested) старый отпускает блокировку
+// и запускает новый экземпляр через sh, который ждёт, пока старый выйдет
+// совсем (не дольше 20 с): иначе экземпляры перекрываются — новый не может
+// занять то, что ещё держит старый (порт отладки, файлы Chromium).
 let relaunchRequested = false;
 
 function relaunchLauncher(why = 'чтобы применить настройки') {
@@ -2978,10 +2980,13 @@ function relaunchLauncher(why = 'чтобы применить настройк�
 
 function spawnNewInstance() {
   app.releaseSingleInstanceLock();
-  // stdout/stderr — те же: вывод нового экземпляра идёт туда же, что и прежнего
-  const p = spawn(process.execPath, process.argv.slice(1), { detached: true, stdio: ['ignore', 'inherit', 'inherit'], env: process.env });
+  // $0 — pid прежнего экземпляра, "$@" — команда нового (exec: тот же pid).
+  // stdout/stderr — те же: вывод нового экземпляра идёт туда же, что и прежнего.
+  const waitThenRun = 'i=0; while kill -0 "$0" 2>/dev/null && [ $i -lt 200 ]; do sleep 0.1; i=$((i+1)); done; exec "$@"';
+  const p = spawn('/bin/sh', ['-c', waitThenRun, String(process.pid), process.execPath, ...process.argv.slice(1)],
+    { detached: true, stdio: ['ignore', 'inherit', 'inherit'], env: process.env });
   p.unref();
-  console.log(`[launcher] запущен новый экземпляр (pid ${p.pid})`);
+  console.log(`[launcher] новый экземпляр (pid ${p.pid}) запустится, когда этот завершится`);
 }
 
 function showSettingsDialog() {

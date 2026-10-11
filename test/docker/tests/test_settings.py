@@ -41,10 +41,13 @@ def test_settings_apply(start, gui):
     # журнал фейкового dsh: «start pgid=… cwd=<папка> args=<аргументы>»
     assert wait_for(lambda: 'cwd=/tmp args=--profile second --no-open' in fakedsh_events(), 60), \
         f'новый dsh — в папке /tmp и с профилем second:\n{fakedsh_events()}'
-    # GUI нового экземпляра через CDP не проверить: его запускает старый, и порт
-    # отладки 9222 остаётся занят унаследованным сокетом (только в тестах —
-    # у пользователей порта отладки нет). Проверяем по результату: dsh отвечает.
     assert wait_port(30), 'новый экземпляр поднял dsh'
+    # новый экземпляр стартует после выхода прежнего — его окно доступно по CDP
+    gui.wait()
+    settings = gui.open_settings()
+    assert settings.value('profile') == 'second', settings.value('profile')
+    assert not settings.restart_banner(), 'настройки применены — плашки «нужен перезапуск» нет'
+    settings.close()
     os.kill(new, 15)
     assert wait_exit(new, 15) is not None, 'новый экземпляр штатно завершился'
 
