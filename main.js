@@ -224,31 +224,37 @@ function startLauncherLog() {
 }
 startLauncherLog();
 
-// Поток в журнал dsh с ротацией и во время работы (dsh бывает разговорчив, а
-// лаунчер открыт неделями): строка не помещается в MAX_LOG_BYTES — прежний
-// поток дописывает своё в <файл>.1 (уже переименованный), строка — в новый файл.
+// Журнал dsh с ротацией и во время работы (dsh бывает разговорчив, а лаунчер
+// открыт неделями): строка не помещается в MAX_LOG_BYTES — файл сдвигается в
+// <файл>.1, строка пишется в новый. Синхронно, через дескриптор: у потока
+// (createWriteStream) файл открывается позже, и после переименования поток
+// писал бы снова в новый файл.
 function openDshLog(file) {
   let size = 0;
   try { size = fs.statSync(file).size; } catch { /* файла ещё нет */ }
-  const open = () => {
-    const st = fs.createWriteStream(file, { flags: 'a' });
-    st.on('error', (e) => console.error('[launcher] dsh.log:', e.message));
-    return st;
-  };
-  let stream = open();
+  let fd = null;
+  try { fd = fs.openSync(file, 'a'); } catch (e) { console.error('[launcher] dsh.log:', e.message); }
   return {
     write(text) {
-      const n = Buffer.byteLength(text);
-      if (size > 0 && size + n > MAX_LOG_BYTES) {
-        stream.end();
-        try { fs.renameSync(file, file + '.1'); } catch { /* noop */ }
-        stream = open();
-        size = 0;
+      if (fd === null) return;
+      try {
+        const n = Buffer.byteLength(text);
+        if (size > 0 && size + n > MAX_LOG_BYTES) {
+          fs.closeSync(fd);
+          fd = null;
+          fs.renameSync(file, file + '.1');
+          fd = fs.openSync(file, 'a');
+          size = 0;
+        }
+        fs.writeSync(fd, text);
+        size += n;
+      } catch (e) {
+        console.error('[launcher] dsh.log:', e.message);
       }
-      stream.write(text);
-      size += n;
     },
-    end() { stream.end(); },
+    end() {
+      if (fd !== null) { try { fs.closeSync(fd); } catch { /* noop */ } fd = null; }
+    },
   };
 }
 

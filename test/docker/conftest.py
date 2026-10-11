@@ -15,7 +15,7 @@ import subprocess
 import pytest
 
 from helpers.cdp import Driver
-from helpers.env import FAKEDSH_LOG
+from helpers.env import FAKEDSH_LOG, STATE
 from helpers.launcher import Launcher, launcher_log, launcher_pids
 from helpers.procs import as_tester, fakedsh_events, pgrep, sh, wait_for
 from helpers.windows import Gui, UpdatePrompt
@@ -113,4 +113,11 @@ def pytest_runtest_makereport(item, call):
     if call.when == 'call' and call.excinfo is not None:
         item.add_report_section('call', 'хвост лога лаунчера', '\n'.join(launcher_log().splitlines()[-25:]))
         item.add_report_section('call', 'журнал фейкового dsh', fakedsh_events() or '(пусто)')
+        # launcher.log — со временем и pid, общий для прежнего и перезапущенного экземпляров
+        try:
+            with open(f'{STATE}/launcher.log', encoding='utf-8', errors='replace') as f:
+                tail = '\n'.join(f.read().splitlines()[-40:])
+        except OSError:
+            tail = '(нет)'
+        item.add_report_section('call', 'launcher.log', tail)
         item.add_report_section('call', 'процессы', sh('ps -eo pid,ppid,user,stat,etime,args --width 220')[1])
