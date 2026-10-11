@@ -1403,16 +1403,29 @@ function updateStatus(latest, installed, scheme) {
 
 // Установленная версия лаунчера через dpkg (пакет .deb dsh-launcher).
 // null — не установлен через .deb (запуск из исходников) → не проверяем.
+/* ===== dpkgStatusVersion (чистая функция, тест test/parsing.js) =====
+   Версия установленного пакета из базы dpkg (/var/lib/dpkg/status): запись
+   «Package: <pkg>» со «Status: … installed» → её «Version:», иначе null. */
+function dpkgStatusVersion(text, pkg) {
+  for (const block of String(text || '').split(/\n(?=Package: )/)) {
+    const name = /^Package: (\S+)/m.exec(block);
+    if (!name || name[1] !== pkg) continue;
+    if (!/^Status: .* installed$/m.test(block)) continue;
+    const ver = /^Version: (\S+)/m.exec(block);
+    if (ver) return ver[1];
+  }
+  return null;
+}
+/* ===== end dpkgStatusVersion ===== */
+
+// Версия пакета лаунчера — из базы dpkg, без запуска dpkg-query: запуск
+// дочернего процесса во время загрузки окна-диалога ронял Electron 44
+// («О программе»: SIGSEGV / «terminate called without an active exception»).
 async function launcherInstalledVersion() {
   const fake = process.env.DSH_LAUNCHER_FAKE_INSTALLED;
   if (fake) return String(fake);
   try {
-    const { stdout } = await execFileAsync('dpkg-query', ['-Wf', '${Version}', 'dsh-launcher'], {
-      encoding: 'utf8',
-      timeout: 3000,
-    });
-    const v = stdout.trim();
-    return v || null;
+    return dpkgStatusVersion(await fs.promises.readFile('/var/lib/dpkg/status', 'utf8'), 'dsh-launcher');
   } catch {
     return null;
   }
@@ -2399,12 +2412,29 @@ async function launcherVersionRaw() {
 
 // Версия dsh: если DSH_BIN исполняется — спрашиваем её (--version), иначе —
 // версия, найденная installCheck при старте.
+// Версия dsh для окон («О программе», «Проверить обновления…») — без запуска
+// dsh --version (см. launcherInstalledVersion): из package.json пакета
+// @deepseek-ai/dsh, к которому ведёт программа dsh (ссылка → …/bin.js), иначе
+// — проверенная при старте; и только если её нет — запуск dsh --version.
+function dshPackageVersion(bin) {
+  try {
+    for (let d = path.dirname(fs.realpathSync(bin)); d !== path.dirname(d); d = path.dirname(d)) {
+      let j;
+      try { j = JSON.parse(fs.readFileSync(path.join(d, 'package.json'), 'utf8')); } catch { continue; }
+      if (j && j.name === DSH_NPM_PKG && j.version) return String(j.version);
+    }
+  } catch { /* программы нет */ }
+  return null;
+}
+
 async function dshVersionRaw() {
+  const v = (DSH_BIN && dshPackageVersion(DSH_BIN)) || dshInstalledVersion;
+  if (v) return v;
   if (DSH_BIN) {
     const r = await probeDsh(DSH_BIN);
     if (r.ok) return r.version;
   }
-  return dshInstalledVersion;
+  return null;
 }
 
 /* ---------------- размер окна между запусками ---------------- */

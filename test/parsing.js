@@ -111,4 +111,19 @@ assert.strictEqual(proxyUrlFromRule('proxy p:1'), 'http://p:1', 'регистр 
   assert.ok(!/console\.(log|error)\([^)]*\$\{GITHUB_TOKEN\}/.test(mainSrc), 'значение токена не печатается');
 }
 
+// ---- dpkgStatusVersion: версия пакета из /var/lib/dpkg/status ----
+{
+  const v = extract('dpkgStatusVersion');
+  const db = [
+    'Package: dsh-launcher-extra', 'Status: install ok installed', 'Version: 9.9.9-1', '',
+    'Package: dsh-launcher', 'Status: install ok installed', 'Priority: optional', 'Version: 1.11.0-1', 'Description: x', ' multi-line', '',
+    'Package: other', 'Status: deinstall ok config-files', 'Version: 2.0', '',
+  ].join('\n');
+  assert.strictEqual(v(db, 'dsh-launcher'), '1.11.0-1', 'установленный пакет');
+  assert.strictEqual(v(db, 'other'), null, 'удалён (остались настройки) — не установлен');
+  assert.strictEqual(v(db, 'absent'), null, 'нет такого пакета');
+  assert.strictEqual(v('', 'dsh-launcher'), null, 'пустая база');
+  assert.strictEqual(v(null, 'dsh-launcher'), null, 'нет файла');
+}
+
 console.log('OK: parsing — все проверки прошли');

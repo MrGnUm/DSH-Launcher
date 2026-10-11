@@ -5,6 +5,17 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
 
+## [Unreleased]
+
+### Fixed
+
+- **“About” crashed the launcher** on some systems (the window stopped
+  responding, then the launcher closed). The cause is an Electron fault:
+  running `dpkg-query` and `dsh --version` while the dialog window loads.
+  The versions are now read without starting processes — from the dpkg
+  database and the dsh package’s `package.json`; the window also opens
+  faster.
+
 ## [1.11.0] — 2026-10-11
 
 ### Added
