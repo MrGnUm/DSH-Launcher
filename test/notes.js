@@ -6,7 +6,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { extract } = require('./_extract');
+const { extract, mainSrc } = require('./_extract');
 
 // Функции сравнения версий — из блока между маркерами «сравнение версий»
 const src = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
@@ -124,15 +124,24 @@ assert.strictEqual(shouldShowWhatsNew('1.5.1', '1.6.0', 'semver'), true, 'сбо
 assert.strictEqual(shouldShowWhatsNew('1.5.1', null, 'semver'), false, 'версия неизвестна');
 
 // ---- releasesCacheMode: кэш списка релизов GitHub ----
-const mode = extract('releasesCacheMode');
+// releasesCacheFresh — в том же блоке, что releasesCacheMode
+const { mode, fresh } = new Function(
+  mainSrc.slice(mainSrc.indexOf('/* ===== releasesCacheMode '), mainSrc.indexOf('/* ===== end releasesCacheMode ===== */')) +
+  ';return { mode: releasesCacheMode, fresh: releasesCacheFresh };')();
 const H = 3600e3; const now = 1e12;
 const e = (o) => ({ list: [], etag: 'W/"x"', fetchedAt: now - 10 * 60e3, ...o });
 assert.strictEqual(mode(null, now, H, false), 'fetch', 'кэша нет → запрос');
 assert.strictEqual(mode({ etag: 'x' }, now, H, false), 'fetch', 'битый кэш → запрос');
-assert.strictEqual(mode(e(), now, H, false), 'cache', 'проверяли 10 мин назад → без запроса');
+assert.strictEqual(mode(e(), now, H, false), 'revalidate', 'есть метка → всегда спросить с If-None-Match (304 бесплатен), даже через 10 мин');
 assert.strictEqual(mode(e({ fetchedAt: now - 2 * H }), now, H, false), 'revalidate', 'давно → с If-None-Match');
-assert.strictEqual(mode(e(), now, H, true), 'revalidate', 'ручная проверка — всегда спросить (с меткой)');
-assert.strictEqual(mode(e({ etag: null, fetchedAt: now - 2 * H }), now, H, false), 'fetch', 'метки нет → обычный запрос');
-assert.strictEqual(mode(e({ fetchedAt: now + 5 * 60e3 }), now, H, false), 'revalidate', 'время из будущего (часы сдвинули) → спросить');
+assert.strictEqual(mode(e(), now, H, true), 'revalidate', 'ручная проверка — с меткой');
+assert.strictEqual(mode(e({ etag: null }), now, H, false), 'cache', 'метки нет, проверяли 10 мин назад → без запроса');
+assert.strictEqual(mode(e({ etag: null }), now, H, true), 'fetch', 'метки нет, ручная проверка → запрос');
+assert.strictEqual(mode(e({ etag: null, fetchedAt: now - 2 * H }), now, H, false), 'fetch', 'метки нет, давно → обычный запрос');
+assert.strictEqual(mode(e({ etag: null, fetchedAt: now + 5 * 60e3 }), now, H, false), 'fetch', 'время из будущего (часы сдвинули) → запрос');
+assert.strictEqual(fresh(e(), now, H), true, 'свежий кэш (запасной при сбое GitHub)');
+assert.strictEqual(fresh(e({ fetchedAt: now - 2 * H }), now, H), false, 'старый — не запасной');
+assert.strictEqual(fresh(e({ fetchedAt: undefined }), now, H), false, 'без времени — не свежий');
+assert.strictEqual(fresh(null, now, H), false, 'кэша нет');
 
-console.log('OK: releaseNotesLang, notesBetween, mdToHtml, redactLog, shouldShowWhatsNew, releasesCacheMode — все проверки прошли');
+console.log('OK: releaseNotesLang, notesBetween, mdToHtml, redactLog, shouldShowWhatsNew, releasesCacheMode, releasesCacheFresh — все проверки прошли');

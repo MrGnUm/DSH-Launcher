@@ -43,8 +43,10 @@ A small Electron app: a window that opens **DeepSeek Harness**
   Don’t ask again” (remembered per version — a newer release asks again). The
   launcher update prompt includes “What’s new” — the changes of every
   version newer than the installed one; after the update, the first start
-  of the new version shows them once more. The release list is remembered:
-  at startup GitHub is asked at most once an hour.
+  of the new version shows them once more. The release list is remembered
+  with its ETag: at startup GitHub is asked “has it changed” — a 304 reply
+  doesn’t use up the request limit, and a new release is seen at once; if
+  GitHub is unreachable, the cached list is used when under an hour old.
   - Launcher update: downloads the release .deb (progress on screen, sha256
     checked against the asset digest from GitHub) and installs it via
     pkexec — polkit asks for the password in a system dialog; as root the

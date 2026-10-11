@@ -1477,19 +1477,29 @@ async function httpJson(url, headers, what) {
 }
 
 /* ===== releasesCacheMode (чистая функция, тест test/notes.js) =====
-   Как получить список релизов GitHub: 'cache' — взять запомненный без
-   запроса (проверяли меньше maxAgeMs назад; ручная проверка — force —
-   так не делает), 'revalidate' — спросить с If-None-Match (ответ 304
-   «не изменилось» не расходует лимит 60/ч), 'fetch' — обычный запрос. */
+   Как получить список релизов GitHub: 'revalidate' — спросить с
+   If-None-Match (есть метка ETag; ответ 304 «не изменилось» не расходует
+   лимит 60/ч — поэтому всегда, и новый релиз виден сразу), 'cache' —
+   взять запомненный без запроса (метки нет, а проверяли меньше maxAgeMs
+   назад; ручная проверка — force — так не делает), 'fetch' — обычный
+   запрос. */
 function releasesCacheMode(entry, now, maxAgeMs, force) {
   const ok = entry && typeof entry === 'object' && Array.isArray(entry.list);
   if (!ok) return 'fetch';
-  if (!force && Number.isFinite(entry.fetchedAt) && now - entry.fetchedAt >= 0 && now - entry.fetchedAt < maxAgeMs) return 'cache';
-  return entry.etag ? 'revalidate' : 'fetch';
+  if (entry.etag) return 'revalidate';
+  if (!force && releasesCacheFresh(entry, now, maxAgeMs)) return 'cache';
+  return 'fetch';
+}
+
+// Кэш проверяли меньше maxAgeMs назад (время из будущего — часы сдвинули — нет).
+function releasesCacheFresh(entry, now, maxAgeMs) {
+  return Boolean(entry) && Number.isFinite(entry.fetchedAt) && now - entry.fetchedAt >= 0 && now - entry.fetchedAt < maxAgeMs;
 }
 /* ===== end releasesCacheMode ===== */
 
-const RELEASES_MAX_AGE_MS = 60 * 60 * 1000; // при запуске — не чаще раза в час
+// Кэш списка релизов: без метки ETag — не спрашивать GitHub чаще раза в час;
+// GitHub не ответил — список из кэша, если он не старше часа.
+const RELEASES_MAX_AGE_MS = 60 * 60 * 1000;
 const releasesCacheFile = () => path.join(app.getPath('userData'), 'releases-cache.json');
 
 // Список релизов GitHub с учётом кэша (см. releasesCacheMode).
@@ -1501,18 +1511,28 @@ async function githubReleases({ force = false } = {}) {
   const headers = { 'User-Agent': 'dsh-launcher', 'Accept': 'application/vnd.github+json' };
   if (mode === 'revalidate') headers['If-None-Match'] = entry.etag;
   if (GITHUB_TOKEN) headers.Authorization = `Bearer ${GITHUB_TOKEN}`; // только api.github.com
-  const res = await httpGet(`https://api.github.com/repos/${UPDATE_GITHUB_REPO}/releases?per_page=20`, { headers });
+  let res;
   let body = '';
-  res.setEncoding('utf8');
-  for await (const c of res) body += c;
+  try {
+    res = await httpGet(`https://api.github.com/repos/${UPDATE_GITHUB_REPO}/releases?per_page=20`, { headers });
+    res.setEncoding('utf8');
+    for await (const c of res) body += c;
+    if (res.statusCode !== 200 && !(res.statusCode === 304 && entry)) throw new Error(`GitHub API: HTTP ${res.statusCode}`);
+  } catch (e) {
+    // нет сети, лимит, сбой GitHub — недавний список лучше никакого
+    if (!force && releasesCacheFresh(entry, Date.now(), RELEASES_MAX_AGE_MS)) {
+      console.log(`[launcher] релизы GitHub: ${e.message} — список из кэша`);
+      return entry.list;
+    }
+    throw e;
+  }
   let list;
-  if (res.statusCode === 304 && entry) {
-    list = entry.list; // не изменилось — лимит не потрачен
-  } else if (res.statusCode === 200) {
+  if (res.statusCode === 304) {
+    list = entry.list;
+    console.log('[launcher] релизы GitHub: не изменились (304, лимит не расходуется)');
+  } else {
     list = JSON.parse(body);
     entry = { etag: res.headers.etag || null, list };
-  } else {
-    throw new Error(`GitHub API: HTTP ${res.statusCode}`);
   }
   try {
     fs.mkdirSync(path.dirname(releasesCacheFile()), { recursive: true });

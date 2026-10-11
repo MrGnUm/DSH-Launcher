@@ -5,6 +5,17 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
 
+## [Unreleased]
+
+### Changed
+
+- **A new release is seen at once.** Within an hour of a check the launcher
+  used to take the release list from its cache and miss a just-published
+  version. Now every check asks GitHub “has it changed” (by ETag): a 304
+  reply doesn’t use up the request limit. If GitHub is unreachable (no
+  network, rate limit), the cached list is used when under an hour old —
+  such a check used to just fail.
+
 ## [1.9.0] — 2026-10-11
 
 ### Added

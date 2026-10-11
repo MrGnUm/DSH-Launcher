@@ -68,24 +68,31 @@ def test_proxy(start, gui):
 
 
 def test_releases_cache(start, gui):
-    """Список релизов GitHub запоминается: второй запуск в течение часа в
-    GitHub не ходит (по журналу прокси), npm — спрашивается как обычно."""
+    """Список релизов GitHub запоминается с меткой ETag: следующий запуск
+    спрашивает с If-None-Match — 304 «не изменилось» (лимит GitHub не
+    расходуется, новый релиз виден сразу); GitHub недоступен — список из
+    кэша (если он не старше часа)."""
     if os.path.exists(PROXY_LOG):
         os.remove(PROXY_LOG)
     subprocess.Popen(f'runuser -u tester -- python3 {PROXY} 3129 >/dev/null 2>&1', shell=True)
     assert wait_for(lambda: os.path.exists(PROXY_LOG) and 'listening' in open(PROXY_LOG).read(), 5, 0.25), 'прокси запущен'
-    url = 'http://127.0.0.1:3129'
-    via_proxy = {'HTTPS_PROXY': url, 'https_proxy': url, 'HTTP_PROXY': url, 'http_proxy': url}
+    proxy = lambda url: {'HTTPS_PROXY': url, 'https_proxy': url, 'HTTP_PROXY': url, 'http_proxy': url}
     github = lambda: open(PROXY_LOG).read().count('CONNECT api.github.com:443')
-    npm = lambda: open(PROXY_LOG).read().count('CONNECT registry.npmjs.org:443')
 
     for run in (1, 2):
-        launcher = start(FAKE, NO_PROMPTS, via_proxy)
+        launcher = start(FAKE, NO_PROMPTS, proxy('http://127.0.0.1:3129'))
         gui.wait()
         assert launcher.wait_log('последний dsh-launcher', 30), f'запуск {run}: проверка обновлений лаунчера прошла'
         assert launcher.wait_log('последний @deepseek-ai/dsh', 30), f'запуск {run}: проверка dsh прошла'
+        if run == 2:
+            assert 'релизы GitHub: не изменились (304' in launcher.log(), 'второй запуск — 304 по метке ETag'
         launcher.term()
+    assert github() == 2, f'GitHub спрошен при каждом запуске ({github()})'
 
-    assert github() == 1, f'GitHub спрошен один раз за два запуска ({github()})'
-    assert npm() == 2, f'npm — при каждом запуске ({npm()})'
+    # GitHub недоступен (прокси не отвечает) — список из недавнего кэша
+    launcher = start(FAKE, NO_PROMPTS, proxy('http://127.0.0.1:3199'))
+    gui.wait()
+    assert launcher.wait_log('— список из кэша', 30), launcher.log()[-1500:]
+    assert launcher.wait_log('последний dsh-launcher', 10), 'проверка лаунчера — по кэшу'
+    launcher.term()
     assert os.path.exists(f'{CONF}/releases-cache.json'), 'кэш релизов записан'
