@@ -216,7 +216,7 @@ async function fetchLauncherLatest({ force = false } = {}) {
 // Блок «Что нового» — версии от новой к старой; пусто — ''.
 function notesBlockHtml(items) {
   const parts = (items || [])
-    .map((r) => ({ v: r.version, html: mdToHtml(releaseNotesLang(r.body, state.UI_LANG)) }))
+    .map((r) => ({ v: r.version, html: mdToHtml(releaseNotesLang(r.body, i18n.getLang())) }))
     .filter((r) => r.html);
   if (!parts.length) return '';
   return `<p style="margin:14px 0 6px; color:#d7dce3">${tr('Что нового:', 'What’s new:')}</p>

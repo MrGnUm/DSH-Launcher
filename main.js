@@ -18,37 +18,23 @@
  *    SIGKILL лаунчеру перехватить нельзя — тот случай остаётся незакрытым.
  */
 
-const { app, BrowserWindow, WebContentsView, Menu, Tray, Notification, nativeImage, protocol, net: electronNet, session, screen, dialog, shell, clipboard } = require('electron');
-const { spawn, execFile, execFileSync } = require('child_process');
-const util = require('util');
-const { promisify } = util;
+const { app, BrowserWindow, protocol, net: electronNet, screen, shell, clipboard } = require('electron');
+const { spawn, execFileSync } = require('child_process');
 const nodeNet = require('net');
-const http = require('http');
-const https = require('https');
-const crypto = require('crypto');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 
-const execFileAsync = promisify(execFile);
 const state = require('./src/state'); // общее состояние (окно, процесс dsh, флаги)
 const i18n = require('./src/i18n');
 const { tr } = i18n;
-const { splitArgs, firstErrLine, esc, profileFromArgs, timedCheck, launcherRoute, redactLog } = require('./src/util');
-const { envWithBinDir, writableOrCreatable, groupAlive, portListenerPid, pgidOf, pickKillTargets } = require('./src/system');
-const { compareDebianVer, compareSemVer, tagToPackageVersion, updateStatus, dpkgStatusVersion, shouldShowWhatsNew, notesBetween } = require('./src/versions');
-const { releaseNotesLang, mdToHtml } = require('./src/notes');
-const { DEFAULT_PORT, DEFAULT_PROFILE, effectiveConfig, settingValue, restartNeeded } = require('./src/config');
-const { releasesCacheMode, releasesCacheFresh, updatePollMs, announceUpdates, proxyUrlFromRule } = require('./src/updates-logic');
-const { WIN_DEFAULT, WIN_MIN, contextMenuItems, keyAction, windowSize, gpuStatus, reportFileName, reportInfoText } = require('./src/ui');
+const { esc, launcherRoute } = require('./src/util');
+const { envWithBinDir } = require('./src/system');
+const { WIN_MIN, keyAction, windowSize } = require('./src/ui');
 
 // Параметры запуска и журнал лаунчера — первыми: env.js убирает токен CI из
 // окружения, log.js начинает писать launcher.log.
-const {
-  GITHUB_TOKEN, UPDATE_NOW, SETTINGS_FILE, loadSettings, CONFIG, DSH_BIN_DEFAULT, DSH_BIN_EXPLICIT, DSH_ARGS, CWD,
-  HOST, PORT, PLAIN_URL, START_TIMEOUT, LOG_DIR, LOG_FILE, LAUNCHER_LOG_FILE, MAX_LOG_BYTES, LANG_FORCED,
-} = require('./src/env');
-const { rotateLog, startLauncherLog, openDshLog } = require('./src/log');
+const { CONFIG, DSH_BIN_DEFAULT, DSH_ARGS, HOST, PORT, PLAIN_URL, START_TIMEOUT, LOG_DIR, LANG_FORCED } = require('./src/env');
+const { startLauncherLog } = require('./src/log');
 startLauncherLog();
 const { launchDsh, launchDshInner } = require('./src/launch');
 const { openLogsFolder, restartDsh, gpuStatusNow, gpuStatusText, onDialogGpuEnable } = require('./src/file-help');
@@ -65,7 +51,7 @@ const { maybeShowWhatsNew } = require('./src/whats-new');
 const { logTail, showLogDialog } = require('./src/dsh-log');
 const { CLOSE_INHERITED_FDS, startDsh, retryButton } = require('./src/dsh-process');
 const { loadWindowState, trackWindowState } = require('./src/window-state');
-const { dshEnv, probeDsh, findBin, dshInstallCheck, MIN_NODE_MAJOR, npmInstallInfo } = require('./src/dsh-install');
+const { dshInstallCheck } = require('./src/dsh-install');
 const { killGroup, dshLeaderExited, stopDsh, adoptedTargets, stopAdoptedDsh } = require('./src/dsh-stop');
 const { checkPreviousRun, clearRunMarker, maybeShowCrashNotice, saveReport } = require('./src/diagnostics');
 const { closeToTrayOn, attentionOn, attentionSoundOn, trayMenu, setTray, setTrayAttention, showMainWindow, onMainWindowClose, AGENT_POLL_MS, playAgentSound, pollAgentState } = require('./src/tray');
@@ -160,8 +146,7 @@ Object.defineProperties(launcher, {
 // найденный путь запоминается
 state.dshBin = CONFIG.dshBin || DSH_BIN_DEFAULT;
 
-state.UI_LANG = LANG_FORCED || (/^ru/i.test(process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || '') ? 'ru' : 'en');
-i18n.setLang(state.UI_LANG);
+i18n.setLang(LANG_FORCED || (/^ru/i.test(process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || '') ? 'ru' : 'en'));
 
 /* ============================================================== */
 

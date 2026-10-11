@@ -34,7 +34,7 @@ function saveSettings(patch) {
 function setLanguage(lang) {
   if (lang === 'auto') {
     try { fs.rmSync(launcher.langPrefFile(), { force: true }); } catch { /* noop */ }
-    state.UI_LANG = /^ru/i.test(process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || '') ? 'ru' : 'en'; i18n.setLang(state.UI_LANG);
+    i18n.setLang(/^ru/i.test(process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || '') ? 'ru' : 'en');
     launcher.buildAppMenu();
     if (state.currentPage) state.currentPage();
   } else {
@@ -43,7 +43,7 @@ function setLanguage(lang) {
 }
 
 function langSetting() {
-  try { JSON.parse(fs.readFileSync(launcher.langPrefFile(), 'utf8')); return state.UI_LANG; } catch { return 'auto'; }
+  try { JSON.parse(fs.readFileSync(launcher.langPrefFile(), 'utf8')); return i18n.getLang(); } catch { return 'auto'; }
 }
 
 function updateDismissals() {
@@ -177,7 +177,7 @@ function showSettingsDialog() {
         <div class="panes">
           <section id="sec-general" class="form"${state.settingsSection === 'general' ? '' : ' hidden'}>
         <div class="row"><span>${tr('Язык интерфейса', 'Interface language')}</span>
-          ${LANG_FORCED ? `<code>${state.UI_LANG}</code> <span class="hint">${tr('задано переменной', 'set by')} <code>DSH_LAUNCHER_LANG</code></span>`
+          ${LANG_FORCED ? `<code>${i18n.getLang()}</code> <span class="hint">${tr('задано переменной', 'set by')} <code>DSH_LAUNCHER_LANG</code></span>`
             : sel('lang', langSetting(), [['auto', tr('Авто (как в системе)', 'Auto (system)')], ['ru', 'Русский'], ['en', 'English']])}</div>
         <div class="row">${check('spellcheck', state.spellcheckOn, tr('Проверка орфографии в полях ввода', 'Spell check in text fields'))}</div>
           </section>

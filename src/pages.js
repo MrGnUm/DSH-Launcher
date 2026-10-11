@@ -95,9 +95,9 @@ const PAGE_CSS = `
 // opts.dialog — для окна-диалога: без переключателя языка, компактно.
 function pageHtml(title, body, isError, opts = {}) {
   const langLink = (code, label) =>
-    `<a href="dshlauncher://lang/${code}/"${state.UI_LANG === code ? ' class="on"' : ''}>${label}</a>`;
+    `<a href="dshlauncher://lang/${code}/"${i18n.getLang() === code ? ' class="on"' : ''}>${label}</a>`;
   const langSwitch = opts.dialog ? '' : `<div class="lang">${langLink('ru', 'RU')} | ${langLink('en', 'EN')}</div>`;
-  const html = `<!doctype html><html lang="${state.UI_LANG}"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${PAGE_CSS}</style></head><body${opts.dialog ? ' class="dlg"' : ''}>${langSwitch}<div class="wrap${isError ? ' err' : ''}"><h1><span class="dot"></span>${esc(title)}</h1>${body}</div></body></html>`;
+  const html = `<!doctype html><html lang="${i18n.getLang()}"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${PAGE_CSS}</style></head><body${opts.dialog ? ' class="dlg"' : ''}>${langSwitch}<div class="wrap${isError ? ' err' : ''}"><h1><span class="dot"></span>${esc(title)}</h1>${body}</div></body></html>`;
   return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
 }
 /* ===== end pageHtml ===== */
@@ -122,13 +122,13 @@ function loadLangPref() {
   if (LANG_FORCED) return;
   try {
     const v = JSON.parse(fs.readFileSync(langPrefFile(), 'utf8')).lang;
-    if (v === 'ru' || v === 'en') { state.UI_LANG = v; i18n.setLang(state.UI_LANG); }
+    if (v === 'ru' || v === 'en') { i18n.setLang(v); }
   } catch { /* выбора ещё не было — остаётся язык локали */ }
 }
 
 function onLangSwitch(lang) {
-  if ((lang === 'ru' || lang === 'en') && lang !== state.UI_LANG) {
-    state.UI_LANG = lang; i18n.setLang(state.UI_LANG);
+  if ((lang === 'ru' || lang === 'en') && lang !== i18n.getLang()) {
+    i18n.setLang(lang);
     try {
       fs.mkdirSync(path.dirname(langPrefFile()), { recursive: true });
       fs.writeFileSync(langPrefFile(), JSON.stringify({ lang }));

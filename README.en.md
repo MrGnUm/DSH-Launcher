@@ -189,7 +189,7 @@ npm start
 
 ## Configuration
 
-Constants at the very top of `main.js`, or environment variables:
+Defaults are in `src/env.js` and `src/config.js` (and the Settings window), or environment variables:
 
 | Variable                | Default                   | What it does                  |
 |-------------------------|---------------------------|-------------------------------|
@@ -318,10 +318,31 @@ and `launcher.log` (the launcher) — “Help → Open logs folder”.
 > rm ~/Desktop/dsh-launcher.desktop 2>/dev/null
 > ```
 
+### Code layout
+
+`main.js` only assembles the app: the single instance, the startup order
+(`onReady`), the `dshlauncher://` routes, restoring the window after dsh
+restarts, shutdown. Everything else is in `src/` modules:
+
+| Modules | What they hold |
+|---|---|
+| `env.js`, `config.js`, `log.js` | startup parameters (environment and `settings.json`), logs and their rotation |
+| `state.js`, `launcher.js`, `i18n.js` | shared state (window, dsh process, flags), the function registry for calls between modules, the window language |
+| `dsh-install.js`, `dsh-process.js`, `dsh-stop.js`, `launch.js` | finding dsh, starting it and its self-restart, stopping the process tree, bringing the window to the GUI |
+| `pages.js`, `install-page.js`, `market.js` | the launcher's pages, “dsh is not installed”, the marketplace plugin |
+| `updates.js`, `updates-live.js`, `whats-new.js`, `updates-logic.js`, `versions.js`, `notes.js` | updates at startup and while running, “What’s new”, versions, release notes |
+| `dialogs.js`, `settings-window.js`, `dsh-log.js`, `diagnostics.js` | dialog windows, Settings, the dsh log, the report and the crash notice |
+| `menus.js`, `view.js`, `file-help.js`, `window-state.js`, `tray.js` | menus, “View” and find, “File/Help”, window size, tray |
+| `util.js`, `system.js`, `ui.js` | pure functions: argument parsing, processes and ports, menu items, shortcuts |
+
+The pure functions are covered by unit tests (`test/*.js`); modules use each
+other through `launcher.<function>()` and `state.<field>` (resolved at call
+time, so cycles between modules don't get in the way).
+
 ### Tests
 
 ```sh
-npm test            # unit tests of main.js functions (test/*.js)
+npm test            # unit tests of the src/ modules (test/*.js)
 test/docker/run.sh  # scenarios of the installed .deb in Docker: Ubuntu 24.04, 26.04, Debian 13
 ```
 

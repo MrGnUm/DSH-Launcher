@@ -21,7 +21,7 @@ const { extract } = require('./_extract');
 
   // ---- pageHtml: разметка служебной страницы ----
   const { esc } = require('../src/util');
-  const pageHtml = extract('pageHtml', { state: { UI_LANG: 'ru' }, esc, PAGE_CSS: 'CSS' });
+  const pageHtml = extract('pageHtml', { i18n: { getLang: () => 'ru' }, esc, PAGE_CSS: 'CSS' });
   const prefix = 'data:text/html;charset=utf-8,';
   const htmlOf = (data) => decodeURIComponent(data.slice(prefix.length));
 

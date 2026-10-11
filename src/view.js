@@ -69,7 +69,7 @@ function findBarUrl() {
     button{background:#1f2836;border:0;border-radius:7px;color:#d7dce3;width:28px;height:28px;cursor:pointer;font-size:14px}
     button:hover{background:#2a3550}`;
   const go = (r) => `location.href='dshlauncher://find/${r}/'`;
-  const html = `<!doctype html><html lang="${state.UI_LANG}"><head><meta charset="utf-8"><style>${css}</style></head><body>
+  const html = `<!doctype html><html lang="${i18n.getLang()}"><head><meta charset="utf-8"><style>${css}</style></head><body>
     <input id="q" placeholder="${esc(tr('Найти на странице', 'Find in page'))}" spellcheck="false" autocomplete="off">
     <span id="n"></span>
     <button title="${esc(tr('Предыдущее (Shift+Enter)', 'Previous (Shift+Enter)'))}" onclick="${go('prev')}">&#8593;</button>

@@ -22,6 +22,8 @@ The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
 
 ### Changed
 
+- **The code is split into modules** (`src/`): `main.js` went from ~4500 to
+  ~800 lines — it only assembles the app. Behaviour is unchanged.
 - **The Settings window has sections on the left:** “General”, “Updates”,
   “Starting dsh”, “Window”, “Graphics”. “Saved” and errors pop up in the
   window corner and don’t shift the fields.
