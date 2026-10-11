@@ -58,6 +58,7 @@ def test_settings_env_locked(start, gui):
     launcher = start(FAKE, NOUPD, DSH_CWD='/opt')
     gui.wait()
     settings = gui.open_settings()
+    settings.section('dsh')
 
     settings.wait_text(r'Working folder /opt set by DSH_CWD', 5)
     assert 'Choose' not in settings.text().split('Working folder', 1)[1].split('Port', 1)[0], 'нет кнопки «Выбрать…»'

@@ -76,6 +76,7 @@ assert.deepStrictEqual(settingValue('spellcheck', 'true'), { value: true }, 'г�
 assert.deepStrictEqual(settingValue('pollUpdates', 'false'), { value: false }, 'галочка');
 assert.deepStrictEqual(settingValue('closeToTray', 'true'), { value: true }, 'галочка «в трей»');
 assert.deepStrictEqual(settingValue('attention', 'false'), { value: false }, 'галочка «внимание»');
+assert.deepStrictEqual(settingValue('attentionSound', 'true'), { value: true }, 'галочка «звук»');
 assert.ok(settingValue('spellcheck', 'yes').error, 'галочка — только true/false');
 assert.ok(settingValue('market', 'true').error, 'галочки маркета в настройках нет');
 assert.deepStrictEqual(settingValue('lang', 'auto'), { value: 'auto' }, 'язык');

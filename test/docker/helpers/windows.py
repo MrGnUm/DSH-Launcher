@@ -222,6 +222,12 @@ class SettingsDialog(Dialog):
         """Изменить поле (как это делает само окно при изменении поля)."""
         self.go(f'dshlauncher://settings/set/?k={key}&v={value}')
 
+    def section(self, sid):
+        """Раздел в меню слева: general, updates, dsh, window, graphics."""
+        self.drv.eval(f"sec({json.dumps(sid)})", page=self.TITLE)
+        assert wait_for(lambda: self.drv.eval(
+            f"!document.getElementById('sec-' + {json.dumps(sid)}).hidden", page=self.TITLE), 5, 0.2), f'раздел {sid}'
+
     def wait_note(self, pattern, timeout=10):
         return self.wait_text(pattern, timeout)
 

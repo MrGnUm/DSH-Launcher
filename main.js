@@ -18,7 +18,7 @@
  *    SIGKILL лаунчеру перехватить нельзя — тот случай остаётся незакрытым.
  */
 
-const { app, BrowserWindow, WebContentsView, Menu, Tray, nativeImage, protocol, net: electronNet, session, screen, dialog, shell, clipboard } = require('electron');
+const { app, BrowserWindow, WebContentsView, Menu, Tray, Notification, nativeImage, protocol, net: electronNet, session, screen, dialog, shell, clipboard } = require('electron');
 const { spawn, execFile, execFileSync } = require('child_process');
 const util = require('util');
 const { promisify } = util;
@@ -897,6 +897,13 @@ const PAGE_CSS = `
   .dlg .row input:disabled,.dlg .row select:disabled{opacity:.55}
   .dlg .row button{padding:6px 12px;font-size:13px}
   .dlg .row code.val{max-width:360px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dlg .sett{display:flex;gap:22px;align-items:flex-start}
+  .dlg .sett nav{display:flex;flex-direction:column;gap:2px;min-width:150px;position:sticky;top:0}
+  .dlg .sett nav a{padding:7px 12px;border-radius:8px;color:#9aa4b2;cursor:pointer;text-decoration:none;white-space:nowrap}
+  .dlg .sett nav a:hover{background:#151a23;color:#d7dce3}
+  .dlg .sett nav a.on{background:#1f2836;color:#e6ebf4;font-weight:600}
+  .dlg .sett .panes{flex:1;min-width:0}
+  .dlg .sett section[hidden]{display:none}
   .dlg .chk{display:inline-flex;align-items:center;gap:8px;cursor:pointer;line-height:1.4}
   .dlg .chk input{width:16px;height:16px;margin:0;flex:none;accent-color:#3b82f6;cursor:pointer}
   .dlg .hint{font-size:12px;color:#6b7689}
@@ -904,6 +911,14 @@ const PAGE_CSS = `
     margin-bottom:10px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
   .dlg .note{margin:0 0 8px;color:#3fb950}
   .dlg .note.err{color:#f85149}
+  /* «Сохранено» / ошибка в окне «Настройки» — поверх, в углу над кнопками:
+     не сдвигает поля. «Сохранено» гаснет само, ошибка остаётся. */
+  .dlg .pop{position:fixed;right:22px;bottom:74px;margin:0;padding:8px 14px;border-radius:9px;z-index:5;
+    background:#14251a;border:1px solid #2f6b3d;color:#3fb950;box-shadow:0 6px 20px rgba(0,0,0,.45);
+    pointer-events:none;animation:popfade 2.6s ease forwards}
+  .dlg .pop.err{background:#2a1517;border-color:#7f2a2a;color:#f85149;animation:popin .15s ease}
+  @keyframes popfade{0%{opacity:0;transform:translateY(6px)}8%{opacity:1;transform:none}75%{opacity:1}100%{opacity:0}}
+  @keyframes popin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
   .dlg .actions{margin-top:auto;padding-top:14px;display:flex;gap:10px;flex-wrap:wrap}
   .dlg h1{font-size:18px}
   .dlg button{padding:9px 18px}
@@ -2917,6 +2932,7 @@ function settingValue(key, raw) {
     case 'pollUpdates':
     case 'closeToTray':
     case 'attention':
+    case 'attentionSound':
     case 'spellcheck':
       if (v !== 'true' && v !== 'false') return { error: 'bad value' };
       return { value: v === 'true' };
@@ -2986,9 +3002,10 @@ function onSettingsSet(url) {
       else if (key === 'pollUpdates') { saveSettings({ pollUpdates: r.value ? null : false }); setUpdatePolling(r.value); }
       else if (key === 'closeToTray') { saveSettings({ closeToTray: r.value ? true : null }); setTray(r.value); }
       else if (key === 'attention') saveSettings({ attention: r.value ? null : false });
+      else if (key === 'attentionSound') { saveSettings({ attentionSound: r.value ? true : null }); if (r.value && win) playAgentSound(); } // сразу — услышать
       else saveSettings({ [key]: r.value || null }); // dshPath, cwd: '' — по умолчанию
       console.log(`[launcher] настройки: ${key} = ${key === 'dshPath' || key === 'cwd' ? (r.value || '(по умолчанию)') : r.value}`);
-      settingsNote = { text: tr('Сохранено.', 'Saved.'), error: false };
+      settingsNote = { text: tr('Сохранено', 'Saved'), error: false };
     } catch (e) {
       settingsNote = { text: e.message, error: true };
     }
@@ -3053,6 +3070,10 @@ function spawnNewInstance() {
   console.log(`[launcher] новый экземпляр (pid ${p.pid}) запустится, когда этот завершится`);
 }
 
+// Раздел окна «Настройки» (меню слева) — запоминается, пока лаунчер открыт.
+const SETTINGS_SECTIONS = ['general', 'updates', 'dsh', 'window', 'graphics'];
+let settingsSection = 'general';
+
 function showSettingsDialog() {
   const title = tr('Настройки', 'Settings');
   const gen = openDialog(title);
@@ -3076,23 +3097,31 @@ function showSettingsDialog() {
     const body = `
       ${pending.length ? `<div class="banner">${tr('Изменения вступят в силу после перезапуска лаунчера.', 'Changes take effect after the launcher restarts.')}
         <button onclick="go('relaunch')">${tr('Перезапустить лаунчер', 'Restart the launcher')}</button></div>` : ''}
-      ${settingsNote ? `<p class="${settingsNote.error ? 'note err' : 'note'}">${esc(settingsNote.text)}</p>` : ''}
-      <div class="form">
-        <h4>${tr('Общие', 'General')}</h4>
+      ${settingsNote ? `<p class="${settingsNote.error ? 'pop err' : 'pop'}" role="status">${esc(settingsNote.text)}</p>` : ''}
+      <div class="sett">
+        <nav>
+          <a data-s="general" class="${settingsSection === 'general' ? 'on' : ''}" onclick="sec('general')">${tr('Общие', 'General')}</a>
+          <a data-s="updates" class="${settingsSection === 'updates' ? 'on' : ''}" onclick="sec('updates')">${tr('Обновления', 'Updates')}</a>
+          <a data-s="dsh" class="${settingsSection === 'dsh' ? 'on' : ''}" onclick="sec('dsh')">${tr('Запуск dsh', 'Starting dsh')}</a>
+          <a data-s="window" class="${settingsSection === 'window' ? 'on' : ''}" onclick="sec('window')">${tr('Окно', 'Window')}</a>
+          <a data-s="graphics" class="${settingsSection === 'graphics' ? 'on' : ''}" onclick="sec('graphics')">${tr('Графика', 'Graphics')}</a>
+        </nav>
+        <div class="panes">
+          <section id="sec-general" class="form"${settingsSection === 'general' ? '' : ' hidden'}>
         <div class="row"><span>${tr('Язык интерфейса', 'Interface language')}</span>
           ${LANG_FORCED ? `<code>${UI_LANG}</code> <span class="hint">${tr('задано переменной', 'set by')} <code>DSH_LAUNCHER_LANG</code></span>`
             : sel('lang', langSetting(), [['auto', tr('Авто (как в системе)', 'Auto (system)')], ['ru', 'Русский'], ['en', 'English']])}</div>
         <div class="row">${check('spellcheck', spellcheckOn, tr('Проверка орфографии в полях ввода', 'Spell check in text fields'))}</div>
-
-        <h4>${tr('Обновления', 'Updates')}</h4>
+          </section>
+          <section id="sec-updates" class="form"${settingsSection === 'updates' ? '' : ' hidden'}>
         <div class="row">${check('checkUpdates', next.checkUpdates, tr('Проверять обновления при запуске (со следующего запуска)', 'Check for updates at startup (from the next start)'), next.src.checkUpdates === 'env')}
           ${envNote('checkUpdates', 'DSH_LAUNCHER_NO_UPDATE_CHECK')}</div>
         <div class="row">${check('pollUpdates', next.pollUpdates, tr('Проверять обновления раз в 12 часов, пока лаунчер открыт', 'Check for updates every 12 hours while the launcher is open'), next.src.pollUpdates === 'env')}
           ${envNote('pollUpdates', 'DSH_LAUNCHER_NO_UPDATE_CHECK')}</div>
         <div class="row"><span>${dismissed.length ? tr('Не спрашивать: ', 'Don’t ask: ') + esc(dismissed.join(', ')) : tr('Отложенных обновлений нет', 'No postponed updates')}</span>
           ${dismissed.length ? `<button onclick="go('reset-updates')">${tr('Снова спрашивать', 'Ask again')}</button>` : ''}</div>
-
-        <h4>${tr('Запуск dsh', 'Starting dsh')}</h4>
+          </section>
+          <section id="sec-dsh" class="form"${settingsSection === 'dsh' ? '' : ' hidden'}>
         <div class="row"><span>${tr('Программа dsh', 'dsh program')}</span> <code class="val">${esc(dshShown)}</code>
           ${next.src.dshPath === 'env' ? envNote('dshPath', 'DSH_BIN')
             : `<button onclick="go('pick-dsh')">${tr('Выбрать…', 'Choose…')}</button>${next.dshBin ? ` <button onclick="set('dshPath', '')">${tr('Авто', 'Auto')}</button>` : ''}`}</div>
@@ -3105,14 +3134,15 @@ function showSettingsDialog() {
         <div class="row"><span>${tr('Порт', 'Port')}</span>
           <input id="port" type="number" min="1024" max="65535" value="${next.port}" onchange="set('port', this.value)"${locked('port')}>
           ${envNote('port', 'DSH_PORT')}</div>
-
-        <h4>${tr('Окно', 'Window')}</h4>
+          </section>
+          <section id="sec-window" class="form"${settingsSection === 'window' ? '' : ' hidden'}>
         <div class="row">${check('closeToTray', closeToTrayOn(), tr('Крестик прячет окно в трей — dsh работает дальше', 'The close button hides the window to the tray — dsh keeps running'))}</div>
         <p class="hint">${tr('Нужен трей на рабочем столе (в GNOME — расширение AppIndicator, в Ubuntu оно есть). Спрятанное окно вернёт и повторный запуск лаунчера.',
                              'Needs a system tray on the desktop (in GNOME — the AppIndicator extension, included in Ubuntu). Starting the launcher again also brings the hidden window back.')}</p>
-        <div class="row">${check('attention', attentionOn(), tr('Привлекать внимание, когда агент закончил ответ, а окно не в фокусе', 'Draw attention when the agent finishes and the window is not focused'))}</div>
-
-        <h4>${tr('Графика', 'Graphics')}</h4>
+        <div class="row">${check('attention', attentionOn(), tr('Сообщать, когда агент закончил ответ, а окно не в фокусе (уведомление, точка на значке трея)', 'Tell me when the agent finishes and the window is not focused (a notification, a dot on the tray icon)'))}</div>
+        <div class="row">${check('attentionSound', attentionSoundOn(), tr('…и звуком', '…and with a sound'))}</div>
+          </section>
+          <section id="sec-graphics" class="form"${settingsSection === 'graphics' ? '' : ' hidden'}>
         <div class="row"><span>${tr('GPU-ускорение', 'GPU acceleration')}</span>
           ${sel('gpu', next.noGpu ? 'off' : 'auto', [['auto', tr('Авто', 'Auto')], ['off', tr('Выключено', 'Off')]])}
           ${envNote('gpu', 'DSH_LAUNCHER_NO_GPU')}</div>
@@ -3121,11 +3151,19 @@ function showSettingsDialog() {
         <div class="row"><span>${tr('Окно на Wayland', 'Window on Wayland')}</span>
           ${sel('ozone', next.ozone, [['auto', tr('Авто', 'Auto')], ['wayland', 'Wayland'], ['x11', tr('X11 (XWayland) — если окна не видно', 'X11 (XWayland) — if the window is invisible')]])}
           ${envNote('ozone', 'DSH_LAUNCHER_OZONE')}</div>
+          </section>
+        </div>
       </div>
       <div class="actions">${dialogCloseButton()}</div>
       <script>
         function set(k, v) { location.href = 'dshlauncher://settings/set/?k=' + encodeURIComponent(k) + '&v=' + encodeURIComponent(v); }
         function go(r) { location.href = 'dshlauncher://settings/' + r + '/'; }
+        // раздел — сразу на странице; лаунчер запоминает его для перерисовок
+        function sec(id) {
+          for (const el of document.querySelectorAll('.sett section')) el.hidden = el.id !== 'sec-' + id;
+          for (const a of document.querySelectorAll('.sett nav a')) a.className = a.dataset.s === id ? 'on' : '';
+          location.href = 'dshlauncher://settings/section/?s=' + id;
+        }
       </script>`;
     dialogPage(title, body);
   };
@@ -3739,6 +3777,7 @@ let trayIcons = null;
 
 const closeToTrayOn = () => (loadSettings() || {}).closeToTray === true;
 const attentionOn = () => (loadSettings() || {}).attention !== false;
+const attentionSoundOn = () => (loadSettings() || {}).attentionSound === true;
 
 // Значок трея и он же с оранжевой точкой («агент закончил»).
 function makeTrayIcons() {
@@ -3816,10 +3855,49 @@ function onMainWindowClose(e) {
 // [data-chat-running] (только у открытой в окне сессии; это внутренняя
 // деталь интерфейса dsh — если её переименуют, сигнал просто перестанет
 // срабатывать). Проверка раз в 2 с; переход «работал → нет» при окне не в
-// фокусе — мигание кнопки на панели задач, у спрятанного — точка на значке
-// трея.
+// фокусе (или спрятанном) — системное уведомление (клик — открыть окно),
+// точка на значке трея, мигание кнопки на панели задач (под X11; на Wayland
+// в GNOME его нет) и, если включён, звук.
 const AGENT_POLL_MS = 2000;
 let agentRunning = false;
+let agentNotification = null; // ссылка — чтобы уведомление (и его click) не собрал GC
+
+function agentSessionTitle() {
+  try {
+    const m = /^(.*) — [^—]+$/.exec(win.webContents.getTitle()); // «<сессия> — DeepSeek Harness»
+    return m ? m[1] : '';
+  } catch { return ''; }
+}
+
+function notifyAgentFinished() {
+  console.log('[launcher] уведомление: агент закончил ответ');
+  if (!Notification.isSupported()) return;
+  const n = new Notification({
+    title: tr('Агент закончил ответ', 'The agent has finished'),
+    body: agentSessionTitle() || 'DeepSeek Harness',
+    icon: path.join(__dirname, 'icon.png'),
+  });
+  n.on('click', () => showMainWindow());
+  n.show();
+  agentNotification = n;
+}
+
+// Короткий двухнотный сигнал — WebAudio прямо в окне (без внешних программ).
+function playAgentSound() {
+  console.log('[launcher] звук: агент закончил ответ');
+  const js = `(() => { try {
+    const c = new AudioContext(); const t = c.currentTime;
+    for (const [f, at] of [[660, 0], [880, 0.16]]) {
+      const o = c.createOscillator(); const g = c.createGain();
+      o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + at); g.gain.exponentialRampToValueAtTime(0.18, t + at + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.3);
+      o.connect(g).connect(c.destination); o.start(t + at); o.stop(t + at + 0.32);
+    }
+    setTimeout(() => c.close(), 900);
+  } catch (e) {} })()`;
+  win.webContents.executeJavaScript(js, true).catch(() => {});
+}
 
 async function pollAgentState() {
   if (!win || win.isDestroyed() || stopping) return;
@@ -3833,8 +3911,10 @@ async function pollAgentState() {
   const away = hidden || !win.isFocused();
   console.log(`[launcher] агент закончил ответ${hidden ? ' — окно в трее' : away ? ' — окно не в фокусе' : ''}`);
   if (!away || !attentionOn()) return;
-  if (hidden) { setTrayAttention(true); console.log('[launcher] значок трея: агент закончил ответ'); }
-  else { win.flashFrame(true); console.log('[launcher] кнопка окна на панели задач мигает'); }
+  notifyAgentFinished();
+  if (tray) { setTrayAttention(true); console.log('[launcher] значок трея: агент закончил ответ'); }
+  if (!hidden) win.flashFrame(true);
+  if (attentionSoundOn()) playAgentSound();
 }
 
 /* ---------------- запуск dsh и доведение окна до GUI ---------------- */
@@ -4206,6 +4286,11 @@ async function onReady() {
       if (route.startsWith('/menu/log/')) { showLogDialog(); return noContentResponse(); }
       if (route.startsWith('/menu/settings/')) { showSettingsDialog(); return noContentResponse(); }
       if (route.startsWith('/settings/set/')) return onSettingsSet(request.url);
+      if (route.startsWith('/settings/section/')) {
+        const sec = new URL(request.url).searchParams.get('s');
+        if (SETTINGS_SECTIONS.includes(sec)) settingsSection = sec;
+        return noContentResponse();
+      }
       if (route.startsWith('/settings/pick-dsh/')) return onSettingsPick('dshPath');
       if (route.startsWith('/settings/pick-cwd/')) return onSettingsPick('cwd');
       if (route.startsWith('/settings/reset-updates/')) return onSettingsResetUpdates();
@@ -4231,7 +4316,8 @@ async function onReady() {
     show: false,
     // spellcheck включён всегда, а вкл/выкл — session.setSpellCheckerEnabled
     // (меню «Вид»): так переключается без перезапуска.
-    webPreferences: { contextIsolation: true, nodeIntegration: false, spellcheck: true },
+    // autoplayPolicy — звук «агент закончил» (WebAudio) без нажатия в окне
+    webPreferences: { contextIsolation: true, nodeIntegration: false, spellcheck: true, autoplayPolicy: 'no-user-gesture-required' },
   });
   if (size.maximized) win.maximize();
   trackWindowState(win);

@@ -47,10 +47,12 @@ def test_tray_off_shows_window(start, gui):
 
 def test_agent_finished(start, gui):
     """Окно в трее, агент закончил ответ (индикатор [data-chat-running] в чате
-    исчез) — точка на значке трея."""
+    исчез) — системное уведомление, точка на значке трея и (включён) звук."""
     launcher = start(FAKE, NOUPD)
     gui.wait()
     enable_tray(gui, launcher)
+    gui.go('dshlauncher://settings/set/?k=attentionSound&v=true')
+    assert launcher.wait_log('звук: агент закончил ответ', 5), 'включили звук — сразу пробный сигнал'
     gui.go('dshlauncher://window/close/')
     assert launcher.wait_log('окно спрятано в трей', 5)
 
@@ -59,4 +61,6 @@ def test_agent_finished(start, gui):
     gui.eval("document.getElementById('run').remove()")
     assert launcher.wait_log('агент закончил ответ — окно в трее', 10)
     assert launcher.wait_log('значок трея: агент закончил ответ', 5)
+    assert 'уведомление: агент закончил ответ' in launcher.log(), 'системное уведомление'
+    assert launcher.log().count('звук: агент закончил ответ') == 2, 'и звук'
     launcher.term()
