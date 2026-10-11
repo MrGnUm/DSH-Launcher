@@ -1935,10 +1935,8 @@ function restartLauncher() {
   restarting = true;
   const exe = process.env.DSH_LAUNCHER_RESTART_BIN || '/usr/bin/dsh-launcher';
   app.releaseSingleInstanceLock();
-  const p = spawn(exe, [], { detached: true, stdio: 'ignore' });
   let started = false;
-  p.on('spawn', () => { started = true; });
-  p.on('error', (e) => {
+  const fail = (e) => {
     restarting = false;
     launcherUpdatedOnDisk = false; // не перезапускаться заново на каждом падении процесса
     app.requestSingleInstanceLock(); // остаёмся единственным экземпляром
@@ -1949,7 +1947,13 @@ function restartLauncher() {
          `Failed to start the new version: ${e.message}. The update is already installed — restart the launcher manually.`),
       true
     );
-  });
+  };
+  // запуск — через bash (spawnLauncherAfterExit): нет программы — узнаём здесь,
+  // а не по 'error' (bash-то есть)
+  try { fs.accessSync(exe, fs.constants.X_OK); } catch (e) { fail(e); return; }
+  const p = spawnLauncherAfterExit(exe, [], 'ignore');
+  p.on('spawn', () => { started = true; });
+  p.on('error', fail);
   p.unref();
   // Даём событию 'error' chance (нет exe — сработает сразу): если процесс не
   // стартовал, приложение не закрываем — показана ошибка.
@@ -2978,13 +2982,22 @@ function relaunchLauncher(why = 'чтобы применить настройк�
   app.quit();
 }
 
+// Новый экземпляр лаунчера — отдельно от этого, через bash: закрыть
+// унаследованные дескрипторы, кроме 0–2 (Chromium открывает часть своих —
+// например, порт отладки — без «закрыть при exec», и новый экземпляр получал
+// бы их), дождаться, пока этот процесс выйдет (до 20 с), и exec — тот же pid.
+// bash, а не sh: dash не закрывает дескрипторы с номером больше 9.
+// $0 — pid этого процесса, "$@" — команда нового экземпляра.
+function spawnLauncherAfterExit(cmd, args, stdio) {
+  const script = 'for f in /proc/$$/fd/*; do n=${f##*/}; if [ "$n" -gt 2 ] 2>/dev/null; then eval "exec $n>&-" 2>/dev/null; fi; done; ' +
+    'i=0; while kill -0 "$0" 2>/dev/null && [ $i -lt 200 ]; do sleep 0.1; i=$((i+1)); done; exec "$@"';
+  return spawn('/bin/bash', ['-c', script, String(process.pid), cmd, ...args], { detached: true, stdio, env: process.env });
+}
+
 function spawnNewInstance() {
   app.releaseSingleInstanceLock();
-  // $0 — pid прежнего экземпляра, "$@" — команда нового (exec: тот же pid).
-  // stdout/stderr — те же: вывод нового экземпляра идёт туда же, что и прежнего.
-  const waitThenRun = 'i=0; while kill -0 "$0" 2>/dev/null && [ $i -lt 200 ]; do sleep 0.1; i=$((i+1)); done; exec "$@"';
-  const p = spawn('/bin/sh', ['-c', waitThenRun, String(process.pid), process.execPath, ...process.argv.slice(1)],
-    { detached: true, stdio: ['ignore', 'inherit', 'inherit'], env: process.env });
+  // stdout/stderr — те же: вывод нового экземпляра идёт туда же, что и прежнего
+  const p = spawnLauncherAfterExit(process.execPath, process.argv.slice(1), ['ignore', 'inherit', 'inherit']);
   p.unref();
   console.log(`[launcher] новый экземпляр (pid ${p.pid}) запустится, когда этот завершится`);
 }

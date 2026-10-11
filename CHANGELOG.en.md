@@ -10,8 +10,9 @@ The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
 ### Fixed
 
 - **“Restart the launcher”** (Settings window, “Update now”): the new
-  instance starts once the previous one has fully exited — the instances no
-  longer overlap.
+  instance starts once the previous one has fully exited and no longer
+  inherits its open files and sockets (Chromium left them inheritable); the
+  same after an update.
 
 ## [1.10.0] — 2026-10-11
 
