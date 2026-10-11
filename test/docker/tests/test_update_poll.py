@@ -4,13 +4,18 @@
 вопроса) / «Позже»."""
 import json
 import os
+import re
 
-from helpers.env import CONF, FAKE, NO_PROMPTS
-from helpers.procs import fakedsh_starts, wait_exit, wait_for
+from helpers.env import CONF, FAKE, INSTALLED, LATEST, LATEST_PKG, LATEST_RE, NO_PROMPTS, STATE
+from helpers.launcher import launcher_pids
+from helpers.procs import dpkg_version, fakedsh_starts, wait_exit, wait_for, wait_port
 from helpers.windows import UpdateToast
 
 # «последняя» версия dsh на npm — из файла: тест «выпускает» новую на ходу
 DSH_LATEST = '/tmp/dsh-latest'
+# «последняя» версия лаунчера на GitHub — тоже из файла (описания и .deb —
+# настоящего последнего релиза)
+LAUNCHER_LATEST = '/tmp/launcher-latest'
 
 
 def test_update_poll(start, gui, drv):
@@ -78,3 +83,52 @@ def test_update_poll_setting(start, gui):
     assert json.load(open(f'{CONF}/settings.json')) == {}, 'по умолчанию — ключа нет'
     settings.close()
     launcher.term()
+
+
+def test_update_now_launcher(start, gui, drv):
+    """«Обновить сейчас» для самого лаунчера целиком: проверка по таймеру
+    нашла новую версию → плашка → окно с «Что нового» → «Обновить сейчас» —
+    перезапуск, новый экземпляр без вопроса скачивает настоящий последний
+    релиз, сверяет sha256, ставит через pkexec и перезапускается в новую
+    версию; она поднимает dsh."""
+    with open(LAUNCHER_LATEST, 'w') as f:
+        f.write('1.0.0')          # при запуске новой версии нет — вопроса нет
+    os.chmod(LAUNCHER_LATEST, 0o644)
+    launcher = start(FAKE, DSH_LAUNCHER_FAKE_LAUNCHER_LATEST=LAUNCHER_LATEST, DSH_LAUNCHER_FAKE_DSH_LATEST='0.0.1',
+                     DSH_LAUNCHER_UPDATE_POLL_SEC='2')
+    gui.wait()
+    assert 'доступно обновление' not in launcher.log(), 'при запуске обновлений нет'
+
+    with open(LAUNCHER_LATEST, 'w') as f:
+        f.write(LATEST)           # «вышел» настоящий последний релиз
+
+    toast = UpdateToast(drv).wait_shown()
+    assert f'DeepSeek Harness Launcher {LATEST} is available' in toast.text(), toast.text()
+    upd = toast.details('launcher')
+    upd.wait_text(rf'Version {LATEST_RE} is available \(installed: {re.escape(INSTALLED)}\).*What.s new: {LATEST_RE} ', 10)
+
+    upd.update_now()
+    assert launcher.wait_log(f'перезапуск лаунчера, чтобы обновить DeepSeek Harness Launcher до {LATEST}', 10)
+    assert launcher.wait_exit(20) is not None, 'прежний экземпляр завершился'
+    # вывод нового экземпляра — в тот же лог: сразу к установке, без вопроса
+    assert launcher.wait_log('обновление launcher — по просьбе пользователя, без вопроса', 30), launcher.log()[-1500:]
+    assert launcher.wait_log(f'dsh-launcher {LATEST} установлен', 400), launcher.log()[-1500:]
+    assert 'совпадает с релизом' in launcher.log(), 'sha256 совпал с digest релиза'
+    assert dpkg_version() == LATEST_PKG, f'dpkg: установлен {LATEST_PKG}'
+
+    # затем — перезапуск в новую версию (её вывод — в launcher.log), она поднимает dsh
+    assert wait_for(lambda: f'DeepSeek Harness Launcher {LATEST},' in _launcher_log() or
+                    f'DSH Launcher {LATEST},' in _launcher_log(), 60), 'запущена новая версия'
+    assert wait_port(60), 'новая версия подняла dsh'
+    assert fakedsh_starts() == 2, 'dsh запускали первый экземпляр и новая версия; промежуточный — нет'
+    for pid in launcher_pids():
+        os.kill(pid, 15)
+        wait_exit(pid, 15)
+
+
+def _launcher_log():
+    try:
+        with open(f'{STATE}/launcher.log', encoding='utf-8', errors='replace') as f:
+            return f.read()
+    except OSError:
+        return ''
