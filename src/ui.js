@@ -104,4 +104,30 @@ function reportInfoText(facts) {
   return facts.map(([k, v]) => `${k}: ${v === undefined || v === null || v === '' ? '—' : v}`).join('\n') + '\n';
 }
 
-module.exports = { WIN_DEFAULT, WIN_MIN, contextMenuItems, keyAction, windowSize, gpuStatus, reportFileName, reportInfoText };
+/* ===== agentEvent (чистая функция, тест test/agent.js) =====
+   Что изменилось в GUI dsh между двумя проверками: prev/cur — { running,
+   waiting } (waiting — 'approval' | 'question' | 'plan' | null). →
+   { type: 'waiting', kind } — агент остановился и ждёт человека (новое
+   ожидание или другого вида); { type: 'finished' } — ответ закончен и агент
+   ничего не ждёт; null — сообщать не о чем. */
+function agentEvent(prev, cur) {
+  if (cur.waiting && cur.waiting !== prev.waiting) return { type: 'waiting', kind: cur.waiting };
+  if (prev.running && !cur.running && !cur.waiting) return { type: 'finished' };
+  return null;
+}
+/* ===== end agentEvent ===== */
+
+/* ===== crashRestart (чистая функция, тест test/agent.js) =====
+   Перезапускать ли dsh, который завершился сам: только при сбое (код не 0
+   или сигнал) и не больше max раз за windowMs — иначе dsh падает снова и
+   снова, крутить его по кругу бессмысленно. history — времена прошлых
+   авто-перезапусков (мс). → { restart, history } (history — с учётом этого). */
+function crashRestart(history, now, code, signal, max = 3, windowMs = 10 * 60 * 1000) {
+  const recent = (Array.isArray(history) ? history : []).filter((t) => now - t >= 0 && now - t < windowMs);
+  const crashed = code !== 0 || Boolean(signal);
+  if (!crashed || recent.length >= max) return { restart: false, history: recent };
+  return { restart: true, history: [...recent, now] };
+}
+/* ===== end crashRestart ===== */
+
+module.exports = { crashRestart, agentEvent, WIN_DEFAULT, WIN_MIN, contextMenuItems, keyAction, windowSize, gpuStatus, reportFileName, reportInfoText };

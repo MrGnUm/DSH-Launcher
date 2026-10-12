@@ -78,6 +78,7 @@ function onSettingsSet(url) {
       else if (key === 'pollUpdates') { saveSettings({ pollUpdates: r.value ? null : false }); updatesLive.setUpdatePolling(r.value); }
       else if (key === 'closeToTray') { saveSettings({ closeToTray: r.value ? true : null }); tray.setTray(r.value); }
       else if (key === 'attention') saveSettings({ attention: r.value ? null : false });
+      else if (key === 'sandbox') saveSettings({ sandbox: r.value ? true : null });
       else if (key === 'attentionSound') { saveSettings({ attentionSound: r.value ? true : null }); if (r.value && state.win) tray.playAgentSound(); } // сразу — услышать
       else saveSettings({ [key]: r.value || null }); // dshPath, cwd: '' — по умолчанию
       console.log(`[launcher] настройки: ${key} = ${key === 'dshPath' || key === 'cwd' ? (r.value || '(по умолчанию)') : r.value}`);
@@ -140,8 +141,14 @@ function spawnLauncherAfterExit(cmd, args, stdio) {
 
 function spawnNewInstance() {
   app.releaseSingleInstanceLock();
+  // песочница — по настройке (как в run.sh): только с галочкой и настроенным SUID-хелпером
+  const sb = path.join(path.dirname(process.execPath), 'chrome-sandbox');
+  let helperOk = false;
+  try { const st = fs.statSync(sb); helperOk = st.uid === 0 && (st.mode & 0o4000) !== 0; } catch { /* нет хелпера */ }
+  const args = process.argv.slice(1).filter((a) => a !== '--no-sandbox');
+  if (!(helperOk && effectiveConfig(process.env, loadSettings(), os.homedir()).sandbox)) args.push('--no-sandbox');
   // stdout/stderr — те же: вывод нового экземпляра идёт туда же, что и прежнего
-  const p = spawnLauncherAfterExit(process.execPath, process.argv.slice(1), ['ignore', 'inherit', 'inherit']);
+  const p = spawnLauncherAfterExit(process.execPath, args, ['ignore', 'inherit', 'inherit']);
   p.unref();
   console.log(`[launcher] новый экземпляр (pid ${p.pid}) запустится, когда этот завершится`);
 }
@@ -215,7 +222,7 @@ function showSettingsDialog() {
         <div class="row">${check('closeToTray', tray.closeToTrayOn(), tr('Крестик прячет окно в трей — dsh работает дальше', 'The close button hides the window to the tray — dsh keeps running'))}</div>
         <p class="hint">${tr('Нужен трей на рабочем столе (в GNOME — расширение AppIndicator, в Ubuntu оно есть). Спрятанное окно вернёт и повторный запуск лаунчера.',
                              'Needs a system tray on the desktop (in GNOME — the AppIndicator extension, included in Ubuntu). Starting the launcher again also brings the hidden window back.')}</p>
-        <div class="row">${check('attention', tray.attentionOn(), tr('Сообщать, когда агент закончил ответ, а окно не в фокусе (уведомление, точка на значке трея)', 'Tell me when the agent finishes and the window is not focused (a notification, a dot on the tray icon)'))}</div>
+        <div class="row">${check('attention', tray.attentionOn(), tr('Сообщать, когда агент закончил ответ или ждёт вас (подтверждение команды, вопрос, план), а окно не в фокусе — уведомление, точка на значке трея', 'Tell me when the agent finishes or is waiting for you (a command to approve, a question, a plan) and the window is not focused — a notification, a dot on the tray icon'))}</div>
         <div class="row">${check('attentionSound', tray.attentionSoundOn(), tr('…и звуком', '…and with a sound'))}</div>
           </section>
           <section id="sec-graphics" class="form"${state.settingsSection === 'graphics' ? '' : ' hidden'}>
@@ -227,6 +234,9 @@ function showSettingsDialog() {
         <div class="row"><span>${tr('Окно на Wayland', 'Window on Wayland')}</span>
           ${sel('ozone', next.ozone, [['auto', tr('Авто', 'Auto')], ['wayland', 'Wayland'], ['x11', tr('X11 (XWayland) — если окна не видно', 'X11 (XWayland) — if the window is invisible')]])}
           ${envNote('ozone', 'DSH_LAUNCHER_OZONE')}</div>
+        <div class="row">${check('sandbox', next.sandbox, tr('Песочница Chromium (со следующего запуска)', 'Chromium sandbox (from the next start)'))}</div>
+        <p class="hint">${tr('Дополнительная изоляция окна. На части систем с ней лаунчер падает при перезапуске dsh, поэтому по умолчанию выключена; окно показывает только локальный GUI dsh, внешние ссылки открываются в браузере.',
+                             'Extra isolation of the window. On some systems the launcher crashes with it when dsh restarts, so it is off by default; the window only shows the local dsh GUI, external links open in the browser.')}</p>
           </section>
         </div>
       </div>

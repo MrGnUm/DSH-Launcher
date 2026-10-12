@@ -50,7 +50,7 @@ const { onDialogClose, onDialogCopy, showAboutDialog, showUpdateCheckDialog } = 
 const { maybeShowWhatsNew } = require('./src/whats-new');
 const { showRollbackDialog, rollbackTo } = require('./src/rollback');
 const { showLogDialog } = require('./src/dsh-log');
-const { retryButton } = require('./src/dsh-process');
+const { retryButton, maybeShowDshCrashNotice } = require('./src/dsh-process');
 const { loadWindowState, trackWindowState } = require('./src/window-state');
 const { dshInstallCheck } = require('./src/dsh-install');
 const { killGroup, dshLeaderExited, stopDsh, adoptedTargets, stopAdoptedDsh } = require('./src/dsh-stop');
@@ -601,7 +601,7 @@ async function onReady() {
   state.win.webContents.on('did-finish-load', () => {
     // первая загрузка GUI dsh — показать «Что нового», если лаунчер обновился
     try {
-      if (new URL(state.win.webContents.getURL()).origin === new URL(PLAIN_URL).origin) { void maybeShowWhatsNew(); maybeShowCrashNotice(); }
+      if (new URL(state.win.webContents.getURL()).origin === new URL(PLAIN_URL).origin) { void maybeShowWhatsNew(); maybeShowCrashNotice(); maybeShowDshCrashNotice(); }
     } catch { /* data: */ }
     try { console.log('[launcher] страница загружена:', state.win.webContents.getURL().slice(0, 120)); } catch { /* noop */ }
   });

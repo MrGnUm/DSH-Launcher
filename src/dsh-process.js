@@ -4,12 +4,15 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const state = require('./state');
+const { crashRestart } = require('./ui');
 const i18n = require('./i18n');
 const { tr } = i18n;
 const { DSH_ARGS, CWD, LOG_DIR, LOG_FILE } = require('./env');
 const { rotateLog, openDshLog } = require('./log');
 const { dshEnv } = require('./dsh-install');
+const launch = require('./launch');
 const pages = require('./pages');
+const updatesLive = require('./updates-live');
 const launcher = require('./launcher'); // общий реестр (наполняет main.js)
 
 /* ---------------- запуск процесса dsh ---------------- */
@@ -127,13 +130,46 @@ async function handleDshExit(code, signal) {
   } finally {
     adoptionCheck = false;
   }
+  // Сам не поднялся. Упал (не штатный выход) — перезапускаем, но не по кругу.
+  const d = crashRestart(crashHistory, Date.now(), code, signal);
+  crashHistory = d.history;
+  if (d.restart && !state.stopping && state.win && !state.win.isDestroyed()) {
+    console.log(`[launcher] dsh упал (code=${code}, signal=${signal}) — перезапускаю (${crashHistory.length} за 10 минут)`);
+    state.dshCrashNotice = { code, signal };
+    state.launching = true; // слежение за портом не вмешивается — окно до GUI доведёт запуск
+    try { await launch.launchDshInner(); } finally { state.launching = false; }
+    return;
+  }
+  const repeated = code !== 0 || Boolean(signal);
+  if (repeated) console.log('[launcher] dsh падает снова и снова — авто-перезапуск остановлен');
   if (state.win && !state.win.isDestroyed() && !state.stopping) {
-    pages.showPage(() => pages.showStatus(tr('dsh остановился', 'dsh has stopped'), tr(
+    pages.showPage(() => pages.showStatus(tr('dsh остановился', 'dsh has stopped'), (repeated ? tr(
+      `<p>Процесс DeepSeek Harness падает снова и снова — лаунчер перезапускал его
+         несколько раз за последние 10 минут и больше не пробует. Последние строки
+         журнала — ниже, весь журнал — «Справка → Журнал dsh…».</p>`,
+      `<p>The DeepSeek Harness process keeps crashing — the launcher restarted it
+         several times in the last 10 minutes and has stopped trying. The latest
+         log lines are below, the whole log is in “Help → dsh log…”.</p>`) : tr(
       `<p>Процесс DeepSeek Harness завершился, и за 8 секунд новый процесс
          не запустился.</p>`,
       `<p>The DeepSeek Harness process exited, and no new process started
-         within 8 seconds.</p>`) + retryButton() + pages.stderrBlock(), true));
+         within 8 seconds.</p>`)) + retryButton() + pages.stderrBlock(), true));
   }
+}
+
+let crashHistory = []; // времена авто-перезапусков после сбоя
+
+// Плашка «dsh перезапущен после сбоя» — когда GUI снова загрузился.
+function maybeShowDshCrashNotice() {
+  const c = state.dshCrashNotice;
+  if (!c) return;
+  state.dshCrashNotice = null;
+  console.log('[launcher] уведомление: dsh перезапущен после сбоя');
+  updatesLive.showToast(updatesLive.toastPageUrl({
+    title: tr('dsh перезапущен после сбоя', 'dsh was restarted after a crash'),
+    sub: c.signal ? tr(`сигнал ${c.signal}`, `signal ${c.signal}`) : tr(`код выхода ${c.code}`, `exit code ${c.code}`),
+    buttons: [{ label: tr('Журнал dsh…', 'dsh log…'), href: 'dshlauncher://toast/dsh-log/' }],
+  }));
 }
 
 /* ===== retryButton (тест test/pages.js) ===== */
@@ -142,4 +178,4 @@ function retryButton() {
 }
 /* ===== end retryButton ===== */
 
-Object.assign(module.exports, { CLOSE_INHERITED_FDS, startDsh, retryButton }); // дополняем, а не заменяем: модули подключают друг друга по кругу
+Object.assign(module.exports, { CLOSE_INHERITED_FDS, startDsh, retryButton, maybeShowDshCrashNotice }); // дополняем, а не заменяем: модули подключают друг друга по кругу

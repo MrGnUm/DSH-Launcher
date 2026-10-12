@@ -30,4 +30,5 @@ module.exports = {
   findView: null, // (перенесено при разбиении main.js)
   spellcheckOn: true, // (перенесено при разбиении main.js)
   restartingDsh: false, // (перенесено при разбиении main.js)
+  dshCrashNotice: null,      // dsh перезапущен после сбоя — плашка, когда GUI загрузится
 };

@@ -47,7 +47,8 @@ def test_tray_off_shows_window(start, gui):
 
 def test_agent_finished(start, gui):
     """Окно в трее, агент закончил ответ (индикатор [data-chat-running] в чате
-    исчез) — системное уведомление, точка на значке трея и (включён) звук."""
+    исчез) — системное уведомление, точка на значке трея и (включён) звук; агент
+    ждёт подтверждения команды или ответа на вопрос — тот же сигнал."""
     launcher = start(FAKE, NOUPD)
     gui.wait()
     enable_tray(gui, launcher)
@@ -63,4 +64,14 @@ def test_agent_finished(start, gui):
     assert launcher.wait_log('значок трея: агент закончил ответ', 5)
     assert 'уведомление: агент закончил ответ' in launcher.log(), 'системное уведомление'
     assert launcher.log().count('звук: агент закончил ответ') == 2, 'и звук'
+
+    # агент остановился и ждёт подтверждения команды — тот же сигнал
+    gui.eval("document.body.insertAdjacentHTML('beforeend', '<div id=\"ask\" data-approval-key=\"k1\"></div>')")
+    assert launcher.wait_log('агент ждёт: подтверждение команды — окно в трее', 10)
+    assert launcher.wait_log('уведомление: агент ждёт: подтверждение команды', 5)
+    # ответили (панель занята ответом) — повторно не сообщает
+    gui.eval("document.getElementById('ask').setAttribute('aria-busy', 'true')")
+    gui.eval("document.body.insertAdjacentHTML('beforeend', '<div id=\"q\" data-question-key=\"k2\"></div>')")
+    assert launcher.wait_log('агент ждёт: ответ на вопрос', 10), 'вопрос агента'
+    assert launcher.log().count('агент ждёт: подтверждение команды') == 1, 'то же ожидание — один раз'
     launcher.term()

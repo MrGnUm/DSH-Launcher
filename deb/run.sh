@@ -7,10 +7,15 @@ DIR="$(cd "$(dirname "$SELF")" && pwd)"
 ELECTRON="$DIR/electron/electron"
 SB="$DIR/electron/chrome-sandbox"
 
-# Sandbox Chromium включается, если SUID-хелпер настроен (postinst пакета
-# делает chown root:root + chmod 4755 при установке через dpkg/apt от root).
-# Иначе — работаем с --no-sandbox.
-if [ "$(stat -c '%U:%a' "$SB" 2>/dev/null)" = "root:4755" ]; then
+# Песочница Chromium — только если её включили в «Настройки → Графика»
+# ("sandbox": true в settings.json) и SUID-хелпер настроен (postinst пакета:
+# chown root:root + chmod 4755 при установке от root). По умолчанию — без неё:
+# на части рабочих столов (Electron 44, Ubuntu 26.04) с песочницей лаунчер
+# падает, когда завершается и снова запускается дочерний процесс
+# («Перезапустить dsh», перезапуск после сбоя). Окно показывает только
+# локальный GUI dsh и свои страницы; внешние ссылки открываются в браузере.
+SETTINGS="${XDG_CONFIG_HOME:-$HOME/.config}/dsh-launcher/settings.json"
+if [ "$(stat -c '%U:%a' "$SB" 2>/dev/null)" = "root:4755" ] && grep -q '"sandbox": *true' "$SETTINGS" 2>/dev/null; then
   SANDBOX_ARGS=""
 else
   SANDBOX_ARGS="--no-sandbox"

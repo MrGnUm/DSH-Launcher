@@ -12,6 +12,7 @@ const { LOG_DIR, LAUNCHER_LOG_FILE } = require('./env');
 const { probeDsh } = require('./dsh-install');
 const diagnostics = require('./diagnostics');
 const dialogs = require('./dialogs');
+const dshLog = require('./dsh-log');
 const menus = require('./menus');
 const settingsWindow = require('./settings-window');
 const updates = require('./updates');
@@ -182,6 +183,9 @@ function onToastRequest(route, url) {
   } else if (route.startsWith('/toast/crash-log/')) {
     closeUpdateToast();
     void shell.openPath(fs.existsSync(LAUNCHER_LOG_FILE) ? LAUNCHER_LOG_FILE : LOG_DIR);
+  } else if (route.startsWith('/toast/dsh-log/')) {
+    closeUpdateToast();
+    dshLog.showLogDialog();
   } else if (route.startsWith('/toast/report/')) {
     closeUpdateToast();
     void diagnostics.saveReport();

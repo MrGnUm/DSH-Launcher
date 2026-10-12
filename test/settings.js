@@ -17,7 +17,7 @@ const HOME = '/home/u';
   assert.strictEqual(c.port, 3080);
   assert.strictEqual(c.dshBin, null, 'путь к dsh — искать автоматически');
   assert.strictEqual(c.cwd, HOME, 'рабочая папка — домашняя');
-  assert.deepStrictEqual([c.noGpu, c.ozone, c.checkUpdates, c.pollUpdates], [false, 'auto', true, true]);
+  assert.deepStrictEqual([c.noGpu, c.ozone, c.checkUpdates, c.pollUpdates, c.sandbox], [false, 'auto', true, true, false], 'песочница по умолчанию выключена');
   assert.ok(Object.values(c.src).every((v) => v === 'default'), 'всё — по умолчанию');
   assert.deepStrictEqual(cfg({}, null, HOME).args, c.args, 'нет файла настроек');
   assert.deepStrictEqual(cfg({}, 'мусор', HOME).args, c.args, 'файл настроек — не объект');
@@ -25,11 +25,12 @@ const HOME = '/home/u';
 
 // ---- effectiveConfig: из settings.json ----
 {
-  const c = cfg({}, { profile: 'work', port: 3090, dshPath: '/opt/dsh/bin/dsh', cwd: '/srv/p', gpu: 'off', ozone: 'x11', checkUpdates: false, pollUpdates: false }, HOME);
+  const c = cfg({}, { profile: 'work', port: 3090, dshPath: '/opt/dsh/bin/dsh', cwd: '/srv/p', gpu: 'off', ozone: 'x11', checkUpdates: false, pollUpdates: false, sandbox: true }, HOME);
   assert.deepStrictEqual(c.args, ['--profile', 'work', '--no-open', '--port', '3090'], 'профиль и порт передаются dsh');
   assert.deepStrictEqual([c.port, c.dshBin, c.cwd, c.noGpu, c.ozone, c.checkUpdates],
     [3090, '/opt/dsh/bin/dsh', '/srv/p', true, 'x11', false]);
   assert.strictEqual(c.pollUpdates, false, 'раз в 12 часов — выключено');
+  assert.strictEqual(c.sandbox, true, 'песочница — по галочке');
   assert.ok(Object.values(c.src).every((v) => v === 'settings'), 'всё — из файла');
   const onlyStart = cfg({}, { checkUpdates: false }, HOME);
   assert.deepStrictEqual([onlyStart.checkUpdates, onlyStart.pollUpdates], [false, true], 'галочки независимы: без проверки при запуске');
@@ -53,7 +54,7 @@ const HOME = '/home/u';
   assert.deepStrictEqual(c.args, ['--profile', 'ci', '--no-open'], 'DSH_ARGS — как есть (без добавления --port)');
   assert.deepStrictEqual([c.port, c.dshBin, c.cwd, c.noGpu, c.ozone, c.checkUpdates, c.pollUpdates], [4000, '/e/dsh', '/e', true, 'wayland', false, false],
     'DSH_LAUNCHER_NO_UPDATE_CHECK — ни при запуске, ни по времени');
-  assert.ok(Object.values(c.src).every((v) => v === 'env'), 'всё — из переменных');
+  assert.ok(Object.entries(c.src).every(([k, v]) => v === 'env' || k === 'sandbox'), 'всё — из переменных (у песочницы переменной нет)');
   assert.deepStrictEqual(cfg({ DSH_PORT: '4000' }, {}, HOME).args, ['--profile', 'web', '--no-open', '--port', '4000'],
     'DSH_PORT без DSH_ARGS — dsh слушает тот же порт');
   assert.strictEqual(cfg({ DSH_LAUNCHER_OZONE: 'bogus' }, { ozone: 'x11' }, HOME).ozone, 'x11', 'неверная переменная — берём файл');
@@ -90,5 +91,7 @@ assert.deepStrictEqual(restartNeeded(base, cfg({}, { port: 3091 }, HOME)).sort()
 assert.deepStrictEqual(restartNeeded(base, cfg({}, { gpu: 'off', ozone: 'x11', cwd: '/x', dshPath: '/d' }, HOME)).sort(),
   ['cwd', 'dshBin', 'noGpu', 'ozone'], 'GPU, окно, папка, путь → перезапуск');
 assert.deepStrictEqual(restartNeeded(base, cfg({}, { checkUpdates: false, pollUpdates: false }, HOME)), [], 'проверка обновлений — без перезапуска');
+assert.deepStrictEqual(restartNeeded(base, cfg({}, { sandbox: true }, HOME)), ['sandbox'], 'песочница → перезапуск');
+assert.ok(cfg({}, { sandbox: 'yes' }, HOME).sandbox === false, 'песочница — только true');
 
 console.log('OK: effectiveConfig, settingValue, restartNeeded — все проверки прошли');

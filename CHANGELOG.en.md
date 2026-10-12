@@ -7,7 +7,22 @@ The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
 
 ## [Unreleased]
 
+### Added
+
+- **“The agent is waiting for you” signal:** the agent asks to approve a
+  command, has a question or waits for a plan review while the window is not
+  focused — a notification, a dot on the tray icon and (if on) a sound, like
+  for “the agent has finished”.
+- **Auto-restart of dsh after a crash:** if dsh crashes by itself, the
+  launcher restarts it (at most three times in 10 minutes) and shows a “dsh
+  was restarted after a crash” notice with a “dsh log…” button; if it keeps
+  crashing — a page with the log, no endless restarts.
+
 ### Changed
+
+- **The Chromium sandbox is off by default** (`--no-sandbox`): on some
+  desktops (Electron 44, Ubuntu 26.04) the launcher crashed with it on
+  “Restart dsh”. It can be turned on in “Settings → Graphics”.
 
 - **Static code check (ESLint)** — in `npm test` and in CI before every
   build: unknown names, unused imports, unreachable code. The leftovers of

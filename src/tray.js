@@ -3,6 +3,7 @@
 const { app, Menu, Tray, Notification, nativeImage } = require('electron');
 const path = require('path');
 const state = require('./state');
+const { agentEvent } = require('./ui');
 const i18n = require('./i18n');
 const { tr } = i18n;
 const { loadSettings, PLAIN_URL } = require('./env');
@@ -69,10 +70,11 @@ function setTray(on) {
   }
 }
 
-function setTrayAttention(on) {
+// ev — событие agentEvent: подсказка у значка — что именно случилось.
+function setTrayAttention(on, ev = { type: 'finished' }) {
   if (!state.tray || !trayIcons) return;
   state.tray.setImage(on ? trayIcons.attention : trayIcons.normal);
-  state.tray.setToolTip(on ? tr('DeepSeek Harness — агент закончил ответ', 'DeepSeek Harness — the agent has finished') : 'DeepSeek Harness');
+  state.tray.setToolTip(on ? `DeepSeek Harness — ${agentNotice(ev)}` : 'DeepSeek Harness');
 }
 
 function showMainWindow() {
@@ -102,7 +104,7 @@ function onMainWindowClose(e) {
 // точка на значке трея, мигание кнопки на панели задач (под X11; на Wayland
 // в GNOME его нет) и, если включён, звук.
 const AGENT_POLL_MS = 2000;
-let agentRunning = false;
+let agent = { running: false, waiting: null }; // что было при прошлой проверке
 // eslint-disable-next-line no-unused-vars -- только держит ссылку: иначе уведомление (и его click) соберёт GC
 let agentNotification = null;
 
@@ -113,11 +115,24 @@ function agentSessionTitle() {
   } catch { return ''; }
 }
 
-function notifyAgentFinished() {
-  console.log('[launcher] уведомление: агент закончил ответ');
+// Тексты уведомлений по событию agentEvent.
+function agentNotice(ev) {
+  if (ev.type === 'finished') return tr('Агент закончил ответ', 'The agent has finished');
+  if (ev.kind === 'approval') return tr('Агент ждёт подтверждения команды', 'The agent is waiting for you to approve a command');
+  if (ev.kind === 'question') return tr('Агент задал вопрос', 'The agent has a question for you');
+  return tr('Агент ждёт согласования плана', 'The agent is waiting for you to review the plan');
+}
+
+// Для журнала (он на русском независимо от языка окна).
+const agentWhat = (ev) => (ev.type === 'finished' ? 'агент закончил ответ'
+  : `агент ждёт: ${{ approval: 'подтверждение команды', question: 'ответ на вопрос', plan: 'согласование плана' }[ev.kind]}`);
+
+function notifyAgent(ev) {
+  const title = agentNotice(ev);
+  console.log(`[launcher] уведомление: ${agentWhat(ev)}`);
   if (!Notification.isSupported()) return;
   const n = new Notification({
-    title: tr('Агент закончил ответ', 'The agent has finished'),
+    title,
     body: agentSessionTitle() || 'DeepSeek Harness',
     icon: path.join(__dirname, '..', 'icon.png'),
   });
@@ -143,20 +158,36 @@ function playAgentSound() {
   state.win.webContents.executeJavaScript(js, true).catch(() => {});
 }
 
+// Признаки в GUI dsh: [data-chat-running] — агент отвечает; панели ожидания
+// человека — подтверждение команды ([data-approval-key], после ответа —
+// aria-busy), вопрос ([data-question-key]), согласование плана
+// ([data-plan-review-key]). Внутренние детали интерфейса dsh: если их
+// переименуют, сигнал просто перестанет срабатывать.
+const AGENT_PROBE = `(() => ({
+  running: !!document.querySelector('[data-chat-running]'),
+  waiting: document.querySelector('[data-approval-key]:not([aria-busy="true"])') ? 'approval'
+    : document.querySelector('[data-question-key]') ? 'question'
+    : document.querySelector('[data-plan-review-key]') ? 'plan' : null,
+}))()`;
+
 async function pollAgentState() {
   if (!state.win || state.win.isDestroyed() || state.stopping) return;
-  try { if (new URL(state.win.webContents.getURL()).origin !== new URL(PLAIN_URL).origin) { agentRunning = false; return; } } catch { return; }
-  let running;
-  try { running = await state.win.webContents.executeJavaScript("!!document.querySelector('[data-chat-running]')", true); } catch { return; }
-  if (running === agentRunning) return;
-  agentRunning = running;
-  if (running) { console.log('[launcher] агент отвечает'); return; }
+  try { if (new URL(state.win.webContents.getURL()).origin !== new URL(PLAIN_URL).origin) { agent = { running: false, waiting: null }; return; } } catch { return; }
+  let cur;
+  try { cur = await state.win.webContents.executeJavaScript(AGENT_PROBE, true); } catch { return; }
+  if (!cur || typeof cur !== 'object') return;
+  const prev = agent;
+  agent = { running: Boolean(cur.running), waiting: cur.waiting || null };
+  if (agent.running && !prev.running) console.log('[launcher] агент отвечает');
+  const ev = agentEvent(prev, agent);
+  if (!ev) return;
   const hidden = !state.win.isVisible();
   const away = hidden || !state.win.isFocused();
-  console.log(`[launcher] агент закончил ответ${hidden ? ' — окно в трее' : away ? ' — окно не в фокусе' : ''}`);
+  const what = agentWhat(ev);
+  console.log(`[launcher] ${what}${hidden ? ' — окно в трее' : away ? ' — окно не в фокусе' : ''}`);
   if (!away || !attentionOn()) return;
-  notifyAgentFinished();
-  if (state.tray) { setTrayAttention(true); console.log('[launcher] значок трея: агент закончил ответ'); }
+  notifyAgent(ev);
+  if (state.tray) { setTrayAttention(true, ev); console.log(`[launcher] значок трея: ${what}`); }
   if (!hidden) state.win.flashFrame(true);
   if (attentionSoundOn()) playAgentSound();
 }

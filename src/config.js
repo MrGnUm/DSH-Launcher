@@ -64,7 +64,11 @@ function effectiveConfig(env, settings, home) {
   else if (s.pollUpdates === false) { pollUpdates = false; from('pollUpdates', 'settings'); }
   else from('pollUpdates', 'default');
 
-  return { port, args, profile, dshBin, cwd, noGpu, ozone, checkUpdates, pollUpdates, src };
+  // песочница Chromium — только по галочке (run.sh читает тот же settings.json)
+  const sandbox = s.sandbox === true;
+  from('sandbox', sandbox ? 'settings' : 'default');
+
+  return { port, args, profile, dshBin, cwd, noGpu, ozone, checkUpdates, pollUpdates, sandbox, src };
 }
 
 /* Значение поля окна → { value } или { error } (сообщение для окна). */
@@ -89,6 +93,7 @@ function settingValue(key, raw) {
     case 'closeToTray':
     case 'attention':
     case 'attentionSound':
+    case 'sandbox':
     case 'spellcheck':
       if (v !== 'true' && v !== 'false') return { error: 'bad value' };
       return { value: v === 'true' };
@@ -105,7 +110,7 @@ function settingValue(key, raw) {
 
 /* Какие из действующих параметров изменятся после перезапуска лаунчера. */
 function restartNeeded(running, next) {
-  const changed = ['port', 'dshBin', 'cwd', 'noGpu', 'ozone'].filter((k) => running[k] !== next[k]);
+  const changed = ['port', 'dshBin', 'cwd', 'noGpu', 'ozone', 'sandbox'].filter((k) => running[k] !== next[k]);
   if (JSON.stringify(running.args) !== JSON.stringify(next.args)) changed.push('args');
   return changed;
 }

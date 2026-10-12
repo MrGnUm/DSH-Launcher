@@ -7,6 +7,8 @@
                              обновления плагина); FAKE_REBORN_DETACHED=1 — новый
                              процесс в своей группе (иначе — в той же)
   FAKE_SPAM_LINES          — после адреса напечатать столько строк (журнал растёт)
+  FAKE_CRASH_AFTER         — через N с упасть (выход с кодом 3); FAKE_CRASH_ONCE=<файл>
+                             — только в первый раз (файл-метка), дальше работать
 Журнал событий — /tmp/fakedsh.log.
 """
 import http.server
@@ -68,6 +70,18 @@ log('listening')
 print(f'dsh web: http://127.0.0.1:{port}/?token=abc', flush=True)
 for i in range(int(os.environ.get('FAKE_SPAM_LINES', '0'))):
     print(f'spam line {i:05d} ' + '.' * 60, flush=True)
+
+crash_after = float(os.environ.get('FAKE_CRASH_AFTER') or 0)
+crash_once = os.environ.get('FAKE_CRASH_ONCE')
+if ROLE == 'main' and crash_after and not (crash_once and os.path.exists(crash_once)):
+    if crash_once:
+        open(crash_once, 'w').close()
+
+    def crash():
+        time.sleep(crash_after)
+        log('crash')
+        os._exit(3)
+    threading.Thread(target=crash, daemon=True).start()
 
 after = float(os.environ.get('FAKE_SELF_RESTART_AFTER') or 0)
 if ROLE == 'main' and after:

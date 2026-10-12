@@ -111,12 +111,14 @@ A small Electron app: a window that opens **DeepSeek Harness**
     running; the icon menu: “Open”, “Restart dsh”, “Quit”; needs a system
     tray — in GNOME the AppIndicator extension, included in Ubuntu; starting
     the launcher again also brings the hidden window back), “Tell me when the
-    agent finishes” (window not focused — a desktop notification with the
+    agent finishes or is waiting for you” — a command to approve, a
+    question, a plan to review (window not focused — a desktop notification with the
     session title, a dot on the tray icon, under X11 the taskbar button
     flashes; “…and with a sound” is a separate checkbox; only the session
     open in the window is seen);
   - graphics — GPU acceleration (Auto / Off, with the current state), window
-    on Wayland (Auto / Wayland / X11 — if the window is invisible).
+    on Wayland (Auto / Wayland / X11 — if the window is invisible), the
+    Chromium sandbox (off by default, see “About `--no-sandbox`”).
 
   Language, spell check, the 12-hour check, “ask again”, the tray and the
   “agent finished” signal apply at once; the rest — after the launcher
@@ -320,9 +322,9 @@ Installed files:
 - `/usr/share/icons/hicolor/256x256/apps/dsh-launcher.png` — icon.
 
 `postinst` (run as root during installation) sets up Chromium's SUID sandbox
-helper (`chown root:root` + `chmod 4755 chrome-sandbox`); in that case
-`run.sh` starts **without** `--no-sandbox`, and if the helper could not be
-set up it automatically falls back to `--no-sandbox`.
+helper (`chown root:root` + `chmod 4755 chrome-sandbox`). The sandbox itself
+is **off** by default (see “About `--no-sandbox`”) and is turned on with a
+checkbox in “Settings → Graphics”.
 
 Logs in the installed version: `~/.local/state/dsh-launcher/dsh.log` (dsh)
 and `launcher.log` (the launcher) — “Help → Open logs folder”.
@@ -399,10 +401,15 @@ prints it) so as not to hit the 60 requests/hour limit.
 
 ## About `--no-sandbox`
 
-`run.sh` starts Electron with `--no-sandbox`: on Ubuntu systems where
-unprivileged user namespaces are restricted by policy, Chromium's SUID
-helper cannot be set up without `sudo`. For a local trusted UI this is
-fine. If you want to enable the Chromium sandbox:
+The launcher starts Electron with `--no-sandbox`. On some desktops (Electron
+44, Ubuntu 26.04) it crashed with the Chromium sandbox when dsh exits and
+starts again (“Restart dsh”, a restart after a crash). The window only shows
+the local dsh GUI (127.0.0.1) and the launcher's own pages, external links
+open in the browser — that is fine for such an interface.
+
+To turn the sandbox on: “Settings → Graphics → Chromium sandbox” (from the
+next start; needs the SUID helper — installing the package sets it up). When
+running from source:
 
 ```sh
 # from the project directory:
@@ -419,6 +426,9 @@ and remove `--no-sandbox` from the last line of `run.sh`.
   command with a “Copy command” button and, if the global npm prefix is
   writable without sudo, an “Install” button (installs right from the
   window, with a log). “Check again” continues startup once dsh is there.
+- If dsh crashes, the launcher restarts it by itself (at most three times
+  in 10 minutes) and shows a “dsh was restarted after a crash” notice with a
+  “dsh log…” button. If dsh keeps crashing, a page with the log stays.
 - If dsh was restarted (e.g. after a plugin update), the window may show
   “session ended”. The launcher watches the port and reloads the page by
   itself once dsh responds again (usually within 2–3 s). If you don't want
