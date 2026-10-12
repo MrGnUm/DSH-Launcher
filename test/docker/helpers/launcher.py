@@ -50,6 +50,7 @@ class Launcher:
         if GITHUB_TOKEN:
             base['DSH_LAUNCHER_GITHUB_TOKEN'] = GITHUB_TOKEN
         base.update(env)
+        base = {k: v for k, v in base.items() if v is not None}  # None — переменной нет (например, DISPLAY)
         # Окружение — целиком своё (env=base), а не аргументами `env -i A=B`:
         # командную строку любого процесса видно в /proc/*/cmdline.
         # От tester средствами Python (pytest в контейнере — root): окружение

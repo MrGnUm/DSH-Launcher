@@ -74,6 +74,42 @@ def container_env(request):
 
 # ---------------- фикстуры тестов ----------------
 
+WESTON_LOG = '/tmp/weston.log'
+
+
+def os_version():
+    with open('/etc/os-release') as f:
+        return next((l.split('=', 1)[1].strip().strip('"') for l in f if l.startswith('VERSION_ID=')), '')
+
+
+@pytest.fixture
+def wayland():
+    """Wayland-сеанс: безголовый weston от tester. Окружение для лаунчера —
+    WAYLAND_DISPLAY, XDG_RUNTIME_DIR, XDG_SESSION_TYPE=wayland. Только на Ubuntu
+    26.04: остальные сценарии и системы — под X11 (Xvfb)."""
+    if os_version() != '26.04':
+        pytest.skip('Wayland-сценарии — только на Ubuntu 26.04')
+    import pwd
+    pw = pwd.getpwnam('tester')
+    run_dir = f'/run/user/{pw.pw_uid}'
+    os.makedirs(run_dir, exist_ok=True)
+    os.chown(run_dir, pw.pw_uid, pw.pw_gid)
+    os.chmod(run_dir, 0o700)
+    env = {'HOME': pw.pw_dir, 'XDG_RUNTIME_DIR': run_dir, 'PATH': '/usr/sbin:/usr/bin:/sbin:/bin'}
+    with open(WESTON_LOG, 'w') as log:
+        weston = subprocess.Popen(['weston', '--backend=headless', '--socket=wayland-1', '--width=1280', '--height=800',
+                                   '--idle-time=0'], user='tester', group='tester', extra_groups=[], env=env,
+                                  stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL)
+    sock = f'{run_dir}/wayland-1'
+    assert wait_for(lambda: os.path.exists(sock), 15, 0.1), 'weston не поднял Wayland-сокет:\n' + open(WESTON_LOG).read()[-1500:]
+    yield {'WAYLAND_DISPLAY': 'wayland-1', 'XDG_RUNTIME_DIR': run_dir, 'XDG_SESSION_TYPE': 'wayland'}
+    weston.terminate()
+    try:
+        weston.wait(5)
+    except subprocess.TimeoutExpired:
+        weston.kill()
+
+
 @pytest.fixture
 def drv():
     """Драйвер окон (CDP)."""
@@ -120,4 +156,6 @@ def pytest_runtest_makereport(item, call):
         except OSError:
             tail = '(нет)'
         item.add_report_section('call', 'launcher.log', tail)
+        if os.path.exists(WESTON_LOG):
+            item.add_report_section('call', 'weston', '\n'.join(open(WESTON_LOG, errors='replace').read().splitlines()[-20:]))
         item.add_report_section('call', 'процессы', sh('ps -eo pid,ppid,user,stat,etime,args --width 220')[1])
