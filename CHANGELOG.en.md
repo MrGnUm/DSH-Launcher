@@ -7,6 +7,14 @@ The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
 
 ## [Unreleased]
 
+### Added
+
+- **“Help → Roll back to a previous version…”** — if a new version doesn’t
+  suit you: a list of past releases (up to five) and a “Roll back” button.
+  The launcher restarts and installs the chosen version the same way as an
+  update (download, sha256 check, pkexec); it won’t offer the newer version
+  again — this can be undone in “Settings → Updates”.
+
 ### Changed
 
 - **Dialogs live inside the main window** instead of separate windows:

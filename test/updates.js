@@ -29,3 +29,26 @@ assert.deepStrictEqual(announceUpdates({ dsh: '0.3.0' }, null, undefined),
   { menu: { dsh: '0.3.0' }, notify: ['dsh'] }, 'нет файлов — как пустые');
 
 console.log('OK: updatePollMs, announceUpdates — все проверки прошли');
+
+// ---- parseRelease, rollbackCandidates: «Вернуть предыдущую версию…» ----
+{
+  const { parseRelease, rollbackCandidates } = require('../src/updates-logic');
+  const sha = 'a'.repeat(64);
+  const rel = (tag, deb = true, digest = 'sha256:' + sha) => parseRelease({
+    tag_name: tag, published_at: '2026-10-01T10:00:00Z', html_url: 'https://x/' + tag,
+    assets: deb ? [{ name: `dsh-launcher_${tag.slice(1)}-1_amd64.deb`, browser_download_url: 'https://dl/' + tag, digest }] : [{ name: 'notes.txt' }],
+  });
+  assert.deepStrictEqual(rel('v1.2.0'), { version: '1.2.0', date: '2026-10-01', htmlUrl: 'https://x/v1.2.0', assetUrl: 'https://dl/v1.2.0', assetSha256: sha }, 'разбор релиза');
+  assert.strictEqual(rel('v1.0.0', true, '').assetSha256, null, 'старый релиз без digest');
+  assert.strictEqual(rel('v1.0.0', false).assetUrl, null, 'без .deb');
+
+  const all = ['v1.12.0', 'v1.11.1', 'v1.11.0', 'v1.10.0', 'v1.9.0', 'v1.8.1', 'v1.8.0', 'v1.0.0-14'].map((t) => rel(t));
+  assert.deepStrictEqual(rollbackCandidates(all, '1.11.1-1').map((r) => r.version), ['1.11.0', '1.10.0', '1.9.0', '1.8.1', '1.8.0'],
+    'старше установленной, новые первыми, не больше 5');
+  assert.deepStrictEqual(rollbackCandidates(all, '1.10.0-1', 10).map((r) => r.version), ['1.9.0', '1.8.1', '1.8.0', '1.0.0-14'], 'max');
+  assert.deepStrictEqual(rollbackCandidates([rel('v1.9.0', false), rel('v1.8.0')], '1.10.0-1').map((r) => r.version), ['1.8.0'], 'без .deb — нельзя');
+  assert.deepStrictEqual(rollbackCandidates(all, '1.0.0-14'), [], 'старее нет');
+  assert.deepStrictEqual(rollbackCandidates(null, '1.0.0-1'), [], 'нет списка');
+  assert.deepStrictEqual(rollbackCandidates([...all].reverse(), '1.9.0-1').map((r) => r.version)[0], '1.8.1', 'порядок не важен');
+  console.log('OK: parseRelease, rollbackCandidates — все проверки прошли');
+}

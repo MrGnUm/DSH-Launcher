@@ -1,6 +1,7 @@
 'use strict';
 // Обновления — чистая логика: кэш списка релизов, интервал периодической
 // проверки, что показать (пункт меню, плашка) по найденным версиям, прокси.
+const { compareDebianVer, tagToPackageVersion } = require('./versions');
 
 /* Как получить список релизов GitHub: 'revalidate' — спросить с
    If-None-Match (есть метка ETag; ответ 304 «не изменилось» не расходует
@@ -57,4 +58,29 @@ function proxyUrlFromRule(rule) {
   return null;
 }
 
-module.exports = { releasesCacheMode, releasesCacheFresh, updatePollMs, announceUpdates, proxyUrlFromRule };
+/* ===== rollbackCandidates (чистые функции, тест test/updates.js) =====
+   parseRelease — релиз GitHub → { version, date, htmlUrl, assetUrl, assetSha256 }
+   (.deb и его sha256 из digest «sha256:<hex>», у старых релизов может не быть).
+   rollbackCandidates — на что можно вернуться: из разобранных релизов
+   (parseRelease; черновики и prerelease отсеяны раньше) — старше
+   установленного пакета, с .deb; новые первыми, не больше max. */
+function parseRelease(r) {
+  const asset = (r.assets || []).find((a) => String(a.name).endsWith('.deb'));
+  return {
+    version: String(r.tag_name).replace(/^v/, ''),
+    date: r.published_at ? String(r.published_at).slice(0, 10) : null,
+    htmlUrl: r.html_url || null,
+    assetUrl: asset ? asset.browser_download_url : null,
+    assetSha256: asset && /^sha256:[0-9a-f]{64}$/i.test(String(asset.digest || '')) ? String(asset.digest).slice(7).toLowerCase() : null,
+  };
+}
+
+function rollbackCandidates(releases, installedPkg, max = 5) {
+  return (Array.isArray(releases) ? releases : [])
+    .filter((r) => r && r.version && r.assetUrl && compareDebianVer(tagToPackageVersion(r.version), installedPkg) < 0)
+    .sort((a, b) => compareDebianVer(tagToPackageVersion(b.version), tagToPackageVersion(a.version)))
+    .slice(0, max);
+}
+/* ===== end rollbackCandidates ===== */
+
+module.exports = { releasesCacheMode, releasesCacheFresh, updatePollMs, announceUpdates, proxyUrlFromRule, parseRelease, rollbackCandidates };

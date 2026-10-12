@@ -115,6 +115,10 @@ class Gui:
         self.go(f'dshlauncher://menu/update/?k={kind}')
         return UpdateNowDialog(self.drv, kind).wait_loaded()
 
+    def open_rollback(self):
+        self.go('dshlauncher://menu/rollback/')
+        return RollbackDialog(self.drv)
+
     def open_find(self):
         self.drv.key('Ctrl+KeyF', page=GUI_URL)
         return FindBar(self.drv).wait_ready()
@@ -280,6 +284,10 @@ class Toast:
 
 
 UpdateToast = Toast  # плашка обновления — та же
+
+
+class RollbackDialog(Dialog):
+    TITLE = '^Roll back to a previous version$'
 
 
 class ReportDialog(Dialog):

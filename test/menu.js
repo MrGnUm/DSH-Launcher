@@ -135,6 +135,7 @@ assert.ok(/win\.webContents\.on\('context-menu',\s*\(_e, params\) => showContext
       viewActions,
       showAboutDialog: () => calls.push('about'),
       showUpdateCheckDialog: () => calls.push('check'),
+      showRollbackDialog: () => calls.push('rollback'),
       openLogsFolder: () => calls.push('logs'),
       saveReport: () => calls.push('report'),
       restartDsh: () => calls.push('restart'),
@@ -162,9 +163,9 @@ assert.ok(/win\.webContents\.on\('context-menu',\s*\(_e, params\) => showContext
   assert.strictEqual(item(ru[0], 'Выйти').role, 'quit', '«Выйти» — штатный quit');
 
   // «Справка»: обновления, логи, «О программе» — последним пунктом
-  assert.deepStrictEqual(labels(ru[3]), ['Проверить обновления…', 'Журнал dsh…', 'Открыть папку логов', 'Сохранить отчёт…', '|', 'О программе'], '«Справка»');
-  assert.deepStrictEqual(labels(en[3]), ['Check for updates…', 'dsh log…', 'Open logs folder', 'Save report…', '|', 'About'], '«Help»');
-  for (const [label, call] of [['Проверить обновления…', 'check'], ['Журнал dsh…', 'log'], ['Открыть папку логов', 'logs'], ['Сохранить отчёт…', 'report'], ['О программе', 'about']]) {
+  assert.deepStrictEqual(labels(ru[3]), ['Проверить обновления…', 'Вернуть предыдущую версию…', 'Журнал dsh…', 'Открыть папку логов', 'Сохранить отчёт…', '|', 'О программе'], '«Справка»');
+  assert.deepStrictEqual(labels(en[3]), ['Check for updates…', 'Roll back to a previous version…', 'dsh log…', 'Open logs folder', 'Save report…', '|', 'About'], '«Help»');
+  for (const [label, call] of [['Проверить обновления…', 'check'], ['Вернуть предыдущую версию…', 'rollback'], ['Журнал dsh…', 'log'], ['Открыть папку логов', 'logs'], ['Сохранить отчёт…', 'report'], ['О программе', 'about']]) {
     calls.length = 0;
     item(ru[3], label).click();
     assert.deepStrictEqual(calls, [call], `«${label}» → ${call}`);

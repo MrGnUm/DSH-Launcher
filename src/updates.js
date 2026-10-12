@@ -15,8 +15,8 @@ const { esc, timedCheck } = require('./util');
 const { envWithBinDir } = require('./system');
 const { compareDebianVer, compareSemVer, tagToPackageVersion, dpkgStatusVersion, notesBetween } = require('./versions');
 const { releaseNotesLang, mdToHtml } = require('./notes');
-const { releasesCacheMode, releasesCacheFresh, proxyUrlFromRule } = require('./updates-logic');
-const { GITHUB_TOKEN, UPDATE_NOW, CONFIG } = require('./env');
+const { releasesCacheMode, releasesCacheFresh, proxyUrlFromRule, parseRelease } = require('./updates-logic');
+const { GITHUB_TOKEN, UPDATE_NOW, INSTALL_VERSION, CONFIG } = require('./env');
 const { probeDsh, findBin, MIN_NODE_MAJOR, npmInstallInfo } = require('./dsh-install');
 const launcher = require('./launcher'); // общий реестр (наполняет main.js)
 
@@ -201,6 +201,7 @@ async function fetchLauncherLatest({ force = false } = {}) {
       ? String(asset.digest).slice(7).toLowerCase()
       : null,
     releases: rels.map((r) => ({ version: ver(r), body: String(r.body || '') })),
+    all: rels.map(parseRelease), // для «Вернуть предыдущую версию…»
   };
   const fake = fakeLatest('DSH_LAUNCHER_FAKE_LAUNCHER_LATEST'); // разработка/тесты
   if (fake) meta.version = fake;
@@ -321,7 +322,9 @@ function showUpdatePage(note, noteIsError = false) {
   if (mode === 'running') {
     title = kind === 'dsh'
       ? tr('Обновление DeepSeek Harness…', 'Updating DeepSeek Harness…')
-      : tr('Обновление DeepSeek Harness Launcher…', 'Updating DeepSeek Harness Launcher…');
+      : updateState.rollback
+        ? tr(`Установка версии ${updateState.latest}…`, `Installing version ${updateState.latest}…`)
+        : tr('Обновление DeepSeek Harness Launcher…', 'Updating DeepSeek Harness Launcher…');
     body = `
       ${noteHtml}
       <p>${tr('Выполняю', 'Running')} <code>${esc(updateState.cmdLine || '')}</code></p>
@@ -574,19 +577,26 @@ const ROOT_INSTALL_SH = [
   'trap \'rm -rf "$d"\' EXIT',
   'cp -- "$1" "$d/update.deb"',
   'echo "$2  $d/update.deb" | sha256sum -c --quiet -',
-  'DEBIAN_FRONTEND=noninteractive apt-get install -y "$d/update.deb"',
+  // --allow-downgrades: «Вернуть предыдущую версию…» ставит версию старше установленной
+  'DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades "$d/update.deb"',
 ].join('; ');
 
 // true — лаунчер обновлён и сейчас перезапустится: dsh этим экземпляром не
 // запускаем (его поднимет новый).
 async function offerLauncherUpdate() {
   if (UPDATE_NOW === 'dsh') return; // просили обновить dsh — о лаунчере спросим в другой раз
-  const latest = await state.updateChecks.launcher;
-  if (!latest || !latest.version) return; // нет сети / отключено / таймаут
+  const newest = await state.updateChecks.launcher;
+  if (!newest || !newest.version) return; // нет сети / отключено / таймаут
   const installed = await launcherInstalledVersion();
   if (!installed) return; // не установлен через .deb (запуск из исходников)
+  // «Вернуть предыдущую версию…»: ставим выбранную (старше установленной)
+  const target = INSTALL_VERSION ? (newest.all || []).find((r) => r.version === INSTALL_VERSION) : null;
+  if (INSTALL_VERSION && !target) { console.error(`[launcher] версии ${INSTALL_VERSION} нет среди релизов — откат отменён`); return; }
+  const latest = target ? { ...newest, ...target } : newest;
   const latestPkg = tagToPackageVersion(latest.version);
-  if (compareDebianVer(latestPkg, installed) <= 0) return; // новой версии нет
+  if (!target && compareDebianVer(latestPkg, installed) <= 0) return; // новой версии нет
+  updateState.rollback = Boolean(target);
+  if (target) console.log(`[launcher] откат: ставлю ${target.version} (установлена ${installed})`);
   if (UPDATE_NOW !== 'launcher' && updateDismissed('launcher', latest.version)) {
     console.log(`[launcher] обновление до ${latest.version} отклонено — не спрашиваю`);
     return;
@@ -663,6 +673,8 @@ async function offerLauncherUpdate() {
     if (state.stopping) return;
     if (code === 0) {
       console.log(`[launcher] dsh-launcher ${latest.version} установлен`);
+      // после отката не предлагать сразу вернуть самую новую
+      if (target && newest.version !== target.version) updateDismiss('launcher', newest.version);
       showUpdateSuccess();
       return true;
     }

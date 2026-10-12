@@ -7,7 +7,7 @@ import re
 import shutil
 import time
 
-from helpers.env import CONF, FAKE, INSTALLED, LATEST, LATEST_DEB, LATEST_PKG, LATEST_RE, NO_PROMPTS, UPD
+from helpers.env import CONF, FAKE, INSTALLED, LATEST, LATEST_DEB, LATEST_PKG, LATEST_RE, NO_PROMPTS, NOUPD, UPD
 from helpers.procs import as_tester, dpkg_version, fakedsh_starts, sh, wait_exit, wait_for, wait_port
 from helpers.windows import WhatsNewDialog
 
@@ -116,3 +116,23 @@ def test_whats_new(start, gui, drv):
     assert wait_for(lambda: os.stat(last_version).st_mtime_ns != decided_before, 15, 0.2), 'лаунчер проверил версию'
     assert not whats_new.is_open(), 'повторный запуск — окна «Что нового» нет'
     launcher.term()
+
+
+def test_rollback(start, gui):
+    """«Справка → Вернуть предыдущую версию…»: список прошлых релизов; «Вернуть»
+    — перезапуск, новый экземпляр ставит выбранную (более старую) версию через
+    pkexec с понижением; о самой новой версии больше не спрашивает."""
+    launcher = start(FAKE, NOUPD)
+    gui.wait()
+    dlg = gui.open_rollback()
+    dlg.wait_text(rf'Installed: {re.escape(INSTALLED)}\. Choose a version: .*1\.0\.0-14 ', 60)
+
+    dlg.go('dshlauncher://rollback/?v=1.0.0-14')
+    assert launcher.wait_log('перезапуск лаунчера, чтобы вернуть версию 1.0.0-14', 10)
+    assert launcher.wait_exit(20) is not None, 'прежний экземпляр завершился'
+    assert launcher.successor(), 'лаунчер перезапустился'
+    assert launcher.wait_log(f'откат: ставлю 1.0.0-14 (установлена {INSTALLED})', 60), launcher.log()[-1500:]
+    assert launcher.wait_log('dsh-launcher 1.0.0-14 установлен', 400), launcher.log()[-1500:]
+    assert 'совпадает с релизом' in launcher.log(), 'sha256 совпал с digest релиза'
+    assert dpkg_version() == '1.0.0-14', f'dpkg: {dpkg_version()}'
+    assert json.load(open(f'{CONF}/update-prefs.json')).get('launcher') == LATEST, 'о самой новой версии больше не спрашивать'

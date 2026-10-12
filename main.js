@@ -48,6 +48,7 @@ const { setAvailableUpdates, refreshAvailableUpdates, setUpdatePolling, toastPag
 const { onSettingsSet, onSettingsPick, onSettingsResetUpdates, relaunchLauncher, spawnLauncherAfterExit, spawnNewInstance, SETTINGS_SECTIONS, showSettingsDialog } = require('./src/settings-window');
 const { openDialog, closeDialog, dialogOpen, dialogShow, dialogPage, dialogCloseButton, onDialogClose, onDialogCopy, showAboutDialog, showUpdateCheckDialog } = require('./src/dialogs');
 const { maybeShowWhatsNew } = require('./src/whats-new');
+const { showRollbackDialog, rollbackTo } = require('./src/rollback');
 const { logTail, showLogDialog } = require('./src/dsh-log');
 const { CLOSE_INHERITED_FDS, startDsh, retryButton } = require('./src/dsh-process');
 const { loadWindowState, trackWindowState } = require('./src/window-state');
@@ -118,6 +119,7 @@ Object.defineProperties(launcher, {
   showLogDialog: { get: () => showLogDialog, enumerable: true },
   showPage: { get: () => showPage, enumerable: true },
   showPastePage: { get: () => showPastePage, enumerable: true },
+  showRollbackDialog: { get: () => showRollbackDialog, enumerable: true },
   showSettingsDialog: { get: () => showSettingsDialog, enumerable: true },
   showStatus: { get: () => showStatus, enumerable: true },
   showToast: { get: () => showToast, enumerable: true },
@@ -589,6 +591,8 @@ async function onReady() {
       // Ответ 204: страница, с которой перешли (GUI dsh), остаётся на месте.
       if (route.startsWith('/menu/about/')) { void showAboutDialog(); return noContentResponse(); }
       if (route.startsWith('/menu/check/')) { void showUpdateCheckDialog(); return noContentResponse(); }
+      if (route.startsWith('/menu/rollback/')) { void showRollbackDialog(); return noContentResponse(); }
+      if (route.startsWith('/rollback/')) { rollbackTo(new URL(request.url).searchParams.get('v')); return noContentResponse(); }
       if (route.startsWith('/menu/update/')) { showUpdateNowDialog(new URL(request.url).searchParams.get('k')); return noContentResponse(); }
       if (route.startsWith('/toast/')) return onToastRequest(route, request.url);
       if (route.startsWith('/update-now/')) { updateNow(new URL(request.url).searchParams.get('k')); return noContentResponse(); }

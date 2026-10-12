@@ -17,6 +17,11 @@ delete process.env.DSH_LAUNCHER_GITHUB_TOKEN;
 // этой переменной: новый экземпляр сразу ставит обновление, без вопроса.
 const UPDATE_NOW = /^(launcher|dsh)$/.test(process.env.DSH_LAUNCHER_UPDATE_NOW || '') ? process.env.DSH_LAUNCHER_UPDATE_NOW : null;
 delete process.env.DSH_LAUNCHER_UPDATE_NOW;
+// «Вернуть предыдущую версию…»: какую версию лаунчера поставить (вместе с
+// DSH_LAUNCHER_UPDATE_NOW=launcher). Только вида 1.2.3[-N].
+const INSTALL_VERSION = UPDATE_NOW === 'launcher' && /^\d+\.\d+\.\d+(-\d+)?$/.test(process.env.DSH_LAUNCHER_INSTALL_VERSION || '')
+  ? process.env.DSH_LAUNCHER_INSTALL_VERSION : null;
+delete process.env.DSH_LAUNCHER_INSTALL_VERSION;
 
 // Окно «Настройки» пишет ~/.config/dsh-launcher/settings.json (это же userData
 // лаунчера — путь считаем сами: настройки нужны до app.setName). Переменные
@@ -62,6 +67,6 @@ const LANG_FORCED = (() => {
 })();
 
 module.exports = {
-  GITHUB_TOKEN, UPDATE_NOW, SETTINGS_FILE, loadSettings, CONFIG, DSH_BIN_DEFAULT, DSH_BIN_EXPLICIT, DSH_ARGS, CWD,
+  GITHUB_TOKEN, UPDATE_NOW, INSTALL_VERSION, SETTINGS_FILE, loadSettings, CONFIG, DSH_BIN_DEFAULT, DSH_BIN_EXPLICIT, DSH_ARGS, CWD,
   HOST, PORT, PLAIN_URL, START_TIMEOUT, LOG_DIR, LOG_FILE, LAUNCHER_LOG_FILE, MAX_LOG_BYTES, LANG_FORCED,
 };

@@ -82,6 +82,7 @@ function appMenuTemplate() {
         ...upd('dsh', 'dsh'),
         ...(state.availableUpdates.launcher || state.availableUpdates.dsh ? [{ type: 'separator' }] : []),
         { label: tr('Проверить обновления…', 'Check for updates…'), click: () => { void launcher.showUpdateCheckDialog(); } },
+        { label: tr('Вернуть предыдущую версию…', 'Roll back to a previous version…'), click: () => { void launcher.showRollbackDialog(); } },
         { label: tr('Журнал dsh…', 'dsh log…'), click: () => launcher.showLogDialog() },
         { label: tr('Открыть папку логов', 'Open logs folder'), click: () => { void launcher.openLogsFolder(); } },
         { label: tr('Сохранить отчёт…', 'Save report…'), click: () => { void launcher.saveReport(); } },
