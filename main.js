@@ -46,7 +46,7 @@ const { installState, refreshInstallState, showInstallPage } = require('./src/in
 const { pageHtml, stderrBlock, showPage, langPrefFile, loadLangPref, onLangSwitch, loadInWin, showStatus, showPastePage } = require('./src/pages');
 const { setAvailableUpdates, refreshAvailableUpdates, setUpdatePolling, toastPageUrl, placeToast, showToast, onToastRequest, showUpdateNowDialog, updateNow } = require('./src/updates-live');
 const { onSettingsSet, onSettingsPick, onSettingsResetUpdates, relaunchLauncher, spawnLauncherAfterExit, spawnNewInstance, SETTINGS_SECTIONS, showSettingsDialog } = require('./src/settings-window');
-const { dimMain, openDialog, dialogShow, dialogPage, dialogCloseButton, onDialogClose, onDialogCopy, showAboutDialog, showUpdateCheckDialog } = require('./src/dialogs');
+const { openDialog, closeDialog, dialogOpen, dialogShow, dialogPage, dialogCloseButton, onDialogClose, onDialogCopy, showAboutDialog, showUpdateCheckDialog } = require('./src/dialogs');
 const { maybeShowWhatsNew } = require('./src/whats-new');
 const { logTail, showLogDialog } = require('./src/dsh-log');
 const { CLOSE_INHERITED_FDS, startDsh, retryButton } = require('./src/dsh-process');
@@ -72,6 +72,7 @@ Object.defineProperties(launcher, {
   buildAppMenu: { get: () => buildAppMenu, enumerable: true },
   closeToTrayOn: { get: () => closeToTrayOn, enumerable: true },
   dialogCloseButton: { get: () => dialogCloseButton, enumerable: true },
+  dialogOpen: { get: () => dialogOpen, enumerable: true },
   dialogPage: { get: () => dialogPage, enumerable: true },
   dialogShow: { get: () => dialogShow, enumerable: true },
   dshVersionRaw: { get: () => dshVersionRaw, enumerable: true },
@@ -663,8 +664,6 @@ async function onReady() {
     try {
       if (new URL(state.win.webContents.getURL()).origin === new URL(PLAIN_URL).origin) { void maybeShowWhatsNew(); maybeShowCrashNotice(); }
     } catch { /* data: */ }
-    // перезагрузка под открытым диалогом (watchdog) сбрасывает затемнение
-    if (state.dialogWin && !state.dialogWin.isDestroyed()) { state.dimKey = null; void dimMain(true); }
     try { console.log('[launcher] страница загружена:', state.win.webContents.getURL().slice(0, 120)); } catch { /* noop */ }
   });
   state.win.webContents.on('did-fail-load', (_e, code, desc, url, isMainFrame) => {

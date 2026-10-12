@@ -17,12 +17,11 @@ module.exports = {
   dshInstalledVersion: null, // версия dsh, проверенная при запуске
   currentPage: null,         // перерисовка текущей служебной страницы (смена языка)
   portState: null,           // null | 'up' | 'down' — порт dsh (авто-восстановление)
-  dialogWin: null,           // окно-диалог
+  dialogView: null,          // диалог — слой в главном окне (WebContentsView)
   dialogRender: null,        // перерисовка содержимого диалога: (copied) => void
   dialogCopyText: '',        // текст «Скопировать для отчёта»
   tray: null, // (перенесено при разбиении main.js)
   lastReportPath: null, // (перенесено при разбиении main.js)
-  dimKey: null, // (перенесено при разбиении main.js)
   settingsSection: 'general', // раздел окна «Настройки» (меню слева)
   availableUpdates: {}, // (перенесено при разбиении main.js)
   updateChecks: { launcher: null, dsh: null }, // проверки обновлений при запуске (промисы)

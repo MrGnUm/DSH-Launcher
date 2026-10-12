@@ -32,7 +32,7 @@ def test_menu_about(launched, gui):
         assert about.value('DeepSeek Harness Launcher') == INSTALLED, f'#{attempt}: версия лаунчера'
         assert about.value('dsh backend') == '0.2.0-rc.2', f'#{attempt}: версия dsh'
         assert gui.not_reloaded(), f'#{attempt}: GUI dsh под окном не перезагружался'
-        assert gui.dimmed(), f'#{attempt}: GUI dsh под окном затемнён'
+        assert about.is_overlay(), f'#{attempt}: диалог — слой с затемнением внутри главного окна'
         if attempt == 1:
             assert about.value('GPU acceleration').startswith('off (no /dev/dri/renderD'), 'GPU (в контейнере выкл.)'
             assert about.value('logs') == '/home/tester/.local/state/dsh-launcher', 'путь к логам'
@@ -40,7 +40,7 @@ def test_menu_about(launched, gui):
 
         about.close()
 
-        assert wait_for(lambda: not gui.dimmed(), 5), f'#{attempt}: затемнение снято'
+        assert not about.is_open(), f'#{attempt}: слой диалога убран'
         assert launched.alive, f'#{attempt}: лаунчер жив'
 
 

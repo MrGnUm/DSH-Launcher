@@ -96,7 +96,6 @@ function appMenuTemplate() {
 function buildAppMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate()));
   // На Linux setApplicationMenu ставит меню всем окнам — у окна-диалога его быть не должно.
-  if (state.dialogWin && !state.dialogWin.isDestroyed()) state.dialogWin.setMenu(null);
   if (state.tray) state.tray.setContextMenu(launcher.trayMenu());
 }
 
@@ -108,9 +107,9 @@ function buildAppMenu() {
 
 
 /* ===== showContextMenu (тест test/menu.js, с подставными win/Menu/clipboard) ===== */
-function showContextMenu(params, w = state.win) {
-  if (!w || w.isDestroyed()) return;
-  const wc = w.webContents;
+// wc — чьё содержимое (главное окно или слой диалога); меню — над окном w.
+function showContextMenu(params, w = state.win, wc = w && w.webContents) {
+  if (!w || w.isDestroyed() || !wc || wc.isDestroyed()) return;
   const run = {
     cut: () => wc.cut(),
     copy: () => wc.copy(),

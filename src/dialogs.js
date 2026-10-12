@@ -1,6 +1,6 @@
 'use strict';
 // Окно-диалог поверх главного: открытие, содержимое, закрытие, «О программе», «Проверить обновления…».
-const { BrowserWindow, shell, clipboard } = require('electron');
+const { WebContentsView, shell, clipboard } = require('electron');
 const util = require('util');
 const os = require('os');
 const state = require('./state');
@@ -13,33 +13,23 @@ const launcher = require('./launcher'); // общий реестр (наполн
 
 /* ---------------- окно-диалог: «О программе», «Проверить обновления» ---------------- */
 
-// Небольшое модальное окно поверх основного. GUI dsh под ним никуда не
-// уходит — не перезагружается и не теряет состояние. Одно окно на оба
-// пункта: повторный вызов меняет содержимое. Закрыть — кнопкой, Esc или
-// крестиком окна. Кнопки — переходы на dshlauncher://dialog/… (ответ 204:
-// страница остаётся, обработчик делает своё).
+// Диалог — слой внутри главного окна (WebContentsView во всю его площадь):
+// затемнение и карточка по центру, как у панели поиска и плашек. Отдельного
+// окна ОС нет — в панели задач и списке окон ничего лишнего, на Wayland
+// композитор не решает, где его показать. GUI dsh под слоем не
+// перезагружается и не теряет состояние. Один слой на все пункты: повторный
+// вызов меняет содержимое. Закрыть — кнопкой или Esc (клик мимо карточки
+// диалог не закрывает — легко промахнуться).
+// Кнопки — переходы на dshlauncher://dialog/… (ответ 204: страница остаётся,
+// обработчик делает своё).
+let dialogGen = 0; // поколение: поздний async-результат не попадёт в закрытый или сменившийся диалог
 
+const dialogOpen = () => Boolean(state.dialogView && !state.dialogView.webContents.isDestroyed());
 
-let dialogGen = 0;       // поколение: поздний async-результат не попадёт в закрытый или сменившийся диалог
-
-
-
-// Затемнение содержимого главного окна, пока открыт диалог: слой поверх
-// страницы (только CSS, разметку GUI dsh не трогаем). Клики под ним и так
-// не проходят — диалог модальный.
-const DIM_CSS = `
-  @keyframes dshl-dim { from { opacity: 0 } to { opacity: 1 } }
-  html::after { content: ''; position: fixed; inset: 0; z-index: 2147483647;
-    background: rgba(0, 0, 0, 0.55); pointer-events: none;
-    animation: dshl-dim .15s ease-out; }`;
-
-async function dimMain(on) {
-  if (!state.win || state.win.isDestroyed() || state.win.webContents.isDestroyed() || state.stopping) return;
-  const wc = state.win.webContents;
-  try {
-    if (on && !state.dimKey) state.dimKey = await wc.insertCSS(DIM_CSS);
-    else if (!on && state.dimKey) { const k = state.dimKey; state.dimKey = null; await wc.removeInsertedCSS(k); }
-  } catch (e) { console.error('[launcher] затемнение:', e.message); }
+function placeDialog() {
+  if (!dialogOpen() || !state.win || state.win.isDestroyed()) return;
+  const [w, h] = state.win.getContentSize();
+  state.dialogView.setBounds({ x: 0, y: 0, width: w, height: h });
 }
 
 // Открыть диалог (или переиспользовать открытый) — поколение нового содержимого,
@@ -47,54 +37,49 @@ async function dimMain(on) {
 function openDialog(title) {
   if (!state.win || state.win.isDestroyed() || state.stopping) return null;
   dialogGen++;
-  if (state.dialogWin && !state.dialogWin.isDestroyed()) { state.dialogWin.focus(); return dialogGen; }
-  const d = new BrowserWindow({
-    parent: state.win,
-    modal: true,
-    width: 760,
-    height: 580,
-    minWidth: 520,
-    minHeight: 360,
-    resizable: true, // длинный «Что нового» можно растянуть
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    title,
-    backgroundColor: '#0f1115',
-    show: false,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, spellcheck: false },
-  });
-  state.dialogWin = d;
-  d.setMenu(null);
-  d.webContents.setWindowOpenHandler(({ url }) => {
+  if (dialogOpen()) { state.dialogView.webContents.focus(); return dialogGen; }
+  const v = new WebContentsView({ webPreferences: { contextIsolation: true, nodeIntegration: false, spellcheck: false } });
+  v.setBackgroundColor('#00000000'); // затемнение рисует страница слоя
+  state.dialogView = v;
+  const wc = v.webContents;
+  wc.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  d.webContents.on('context-menu', (_e, params) => launcher.showContextMenu(params, d));
-  d.webContents.on('before-input-event', (e, input) => {
-    if (input.type === 'keyDown' && input.key === 'Escape') { e.preventDefault(); d.close(); }
+  wc.on('context-menu', (_e, params) => launcher.showContextMenu(params, state.win, wc));
+  wc.on('before-input-event', (e, input) => {
+    if (input.type === 'keyDown' && input.key === 'Escape') { e.preventDefault(); closeDialog(); }
   });
-  void dimMain(true);
-  d.once('ready-to-show', () => d.show());
-  // Wayland: ready-to-show может опоздать (как у главного окна) — показываем сами.
-  setTimeout(() => { if (!d.isDestroyed() && !d.isVisible()) d.show(); }, 3000);
-  d.on('closed', () => {
-    if (state.dialogWin === d) { state.dialogWin = null; state.dialogRender = null; dialogGen++; }
-    void dimMain(false);
-  });
+  wc.on('did-finish-load', () => { if (!wc.isDestroyed()) wc.focus(); });
+  state.win.contentView.addChildView(v); // поверх всего: GUI, поиска, плашек
+  placeDialog();
+  if (!resizeHooked) { state.win.on('resize', placeDialog); resizeHooked = true; }
+  console.log(`[launcher] диалог: ${title}`);
   return dialogGen;
+}
+let resizeHooked = false;
+
+function closeDialog() {
+  if (!dialogOpen()) return;
+  const v = state.dialogView;
+  state.dialogView = null; state.dialogRender = null; dialogGen++;
+  if (state.win && !state.win.isDestroyed()) {
+    state.win.contentView.removeChildView(v);
+    state.win.webContents.focus();
+  }
+  try { v.webContents.close(); } catch { /* уже закрыт */ }
 }
 
 // Показать содержимое, если диалог того же поколения ещё открыт.
 function dialogShow(gen, render) {
-  if (gen !== dialogGen || !state.dialogWin || state.dialogWin.isDestroyed()) return;
+  if (gen !== dialogGen || !dialogOpen()) return;
   state.dialogRender = render;
   render(false);
 }
 
 function dialogPage(title, body) {
-  if (!state.dialogWin || state.dialogWin.isDestroyed()) return;
-  state.dialogWin.loadURL(launcher.pageHtml(title, body, false, { dialog: true }))
+  if (!dialogOpen()) return;
+  state.dialogView.webContents.loadURL(launcher.pageHtml(title, body, false, { dialog: true }))
     .catch((e) => { if (e.code !== 'ERR_ABORTED') console.error('[launcher] диалог:', e.message); });
 }
 
@@ -102,7 +87,7 @@ const dialogCloseButton = () =>
   `<button onclick="location.href='dshlauncher://dialog/close/'">${tr('Закрыть', 'Close')}</button>`;
 
 function onDialogClose() {
-  if (state.dialogWin && !state.dialogWin.isDestroyed()) state.dialogWin.close();
+  closeDialog();
   return launcher.noContentResponse();
 }
 
@@ -218,4 +203,4 @@ async function showUpdateCheckDialog() {
   });
 }
 
-module.exports = { dimMain, openDialog, dialogShow, dialogPage, dialogCloseButton, onDialogClose, onDialogCopy, showAboutDialog, showUpdateCheckDialog };
+module.exports = { openDialog, closeDialog, dialogOpen, dialogShow, dialogPage, dialogCloseButton, onDialogClose, onDialogCopy, showAboutDialog, showUpdateCheckDialog };

@@ -47,11 +47,6 @@ class Gui:
     def not_reloaded(self):
         return self.eval('window.__mark') == 42
 
-    def dimmed(self):
-        """Затемнена ли страница слоем под окном-диалогом."""
-        bg = self.eval("getComputedStyle(document.documentElement, '::after').backgroundColor") or ''
-        return '0.55' in bg
-
     def outer_width(self):
         return self.eval('window.outerWidth')
 
@@ -150,6 +145,11 @@ class Dialog:
 
     def is_open(self):
         return self.drv.page(self.TITLE) is not None
+
+    def is_overlay(self):
+        """Диалог — слой внутри главного окна: затемнение во всю площадь, карточка по центру."""
+        return bool(self.drv.eval("document.documentElement.classList.contains('ovl')"
+                                  " && getComputedStyle(document.body).backgroundColor.includes('0.55')", page=self.TITLE))
 
     def go(self, route):
         self.drv.go(route, page=self.TITLE)

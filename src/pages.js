@@ -52,6 +52,13 @@ const PAGE_CSS = `
   .notes a{color:#7aa2f7}
   .dlg .wrap{max-width:none;padding:20px 24px;height:100%;box-sizing:border-box;
     display:flex;flex-direction:column}
+  /* диалог — слой внутри главного окна: затемнение и карточка по центру */
+  html.ovl,html.ovl body{background:transparent}
+  html.ovl body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
+    background:rgba(0,0,0,.55);animation:ovlin .12s ease-out}
+  html.ovl .wrap{width:min(760px,calc(100vw - 48px));height:min(580px,calc(100vh - 48px));
+    background:#0f1115;border:1px solid #2a3550;border-radius:14px;box-shadow:0 18px 60px rgba(0,0,0,.6)}
+  @keyframes ovlin{from{opacity:0}to{opacity:1}}
   .dlg .notes{flex:1 1 auto;max-height:none;min-height:80px;margin-bottom:0}
   .dlg pre.log{flex:1 1 auto;max-height:none;min-height:80px;margin:0;white-space:pre-wrap}
   .dlg .form{flex:1 1 auto;overflow:auto;min-height:0;padding-right:6px}
@@ -97,7 +104,7 @@ function pageHtml(title, body, isError, opts = {}) {
   const langLink = (code, label) =>
     `<a href="dshlauncher://lang/${code}/"${i18n.getLang() === code ? ' class="on"' : ''}>${label}</a>`;
   const langSwitch = opts.dialog ? '' : `<div class="lang">${langLink('ru', 'RU')} | ${langLink('en', 'EN')}</div>`;
-  const html = `<!doctype html><html lang="${i18n.getLang()}"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${PAGE_CSS}</style></head><body${opts.dialog ? ' class="dlg"' : ''}>${langSwitch}<div class="wrap${isError ? ' err' : ''}"><h1><span class="dot"></span>${esc(title)}</h1>${body}</div></body></html>`;
+  const html = `<!doctype html><html lang="${i18n.getLang()}"${opts.dialog ? ' class="ovl"' : ''}><head><meta charset="utf-8"><title>${esc(title)}</title><style>${PAGE_CSS}</style></head><body${opts.dialog ? ' class="dlg"' : ''}>${langSwitch}<div class="wrap${isError ? ' err' : ''}"><h1><span class="dot"></span>${esc(title)}</h1>${body}</div></body></html>`;
   return 'data:text/html;charset=utf-8,' + encodeURIComponent(html);
 }
 /* ===== end pageHtml ===== */

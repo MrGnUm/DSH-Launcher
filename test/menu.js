@@ -60,6 +60,7 @@ function fakeEnv({ destroyed = false } = {}) {
   const calls = [];
   const wc = {};
   for (const m of ['cut', 'copy', 'paste', 'selectAll']) wc[m] = () => calls.push('wc.' + m);
+  wc.isDestroyed = () => destroyed;
   const win = { webContents: wc, isDestroyed: () => destroyed };
   const env = { calls, win, template: null, popupOpts: null };
   const Menu = {
@@ -97,14 +98,15 @@ const byLabel = (env, label) => env.template.find((i) => i.label === label);
   assert.deepStrictEqual(env.calls, ['clipboard:https://example.com/a?b=1'], 'адрес ссылки в буфере');
 }
 {
-  // Окно передано явно (диалог «О программе»): меню и действия — в нём
+  // Диалог «О программе» — слой главного окна: меню — над главным окном,
+  // действия — в содержимом слоя
   const env = fakeEnv();
   const calls2 = [];
-  const dlg = { isDestroyed: () => false, webContents: { cut() {}, copy: () => calls2.push('dlg.copy'), paste() {}, selectAll() {} } };
-  env.show({ isEditable: false, selectionText: 'v1.4.0' }, dlg);
-  assert.strictEqual(env.popupOpts.window, dlg, 'меню показывается в окне-диалоге');
+  const dlgWc = { isDestroyed: () => false, cut() {}, copy: () => calls2.push('dlg.copy'), paste() {}, selectAll() {} };
+  env.show({ isEditable: false, selectionText: 'v1.4.0' }, env.win, dlgWc);
+  assert.strictEqual(env.popupOpts.window, env.win, 'меню показывается над главным окном');
   byLabel(env, 'Копировать').click();
-  assert.deepStrictEqual(calls2, ['dlg.copy'], '«Копировать» — в диалоге');
+  assert.deepStrictEqual(calls2, ['dlg.copy'], '«Копировать» — в слое диалога');
   assert.deepStrictEqual(env.calls.filter((c) => c.startsWith('wc.')), [], 'главное окно не тронуто');
 }
 {

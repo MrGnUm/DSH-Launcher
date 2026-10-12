@@ -5,6 +5,16 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
 
+## [Unreleased]
+
+### Changed
+
+- **Dialogs live inside the main window** instead of separate windows:
+  “About”, “Settings”, “Check for updates…”, “dsh log”, “What’s new”, the
+  report. The dsh page is dimmed, the card is centred; no extra windows in
+  the taskbar or Alt+Tab. Close with the button or Esc. File pickers stay
+  native.
+
 ## [1.12.0] — 2026-10-12
 
 ### Added

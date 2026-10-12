@@ -83,9 +83,9 @@ function onSettingsSet(url) {
 }
 
 async function onSettingsPick(kind) {
-  if (!state.dialogWin || state.dialogWin.isDestroyed()) return launcher.noContentResponse();
+  if (!launcher.dialogOpen()) return launcher.noContentResponse();
   const isDir = kind === 'cwd';
-  const r = await dialog.showOpenDialog(state.dialogWin, {
+  const r = await dialog.showOpenDialog(state.win, {
     title: isDir ? tr('Рабочая папка dsh', 'dsh working folder') : tr('Программа dsh', 'The dsh program'),
     defaultPath: isDir ? CWD : path.dirname(state.dshBin),
     properties: isDir ? ['openDirectory'] : ['openFile'],

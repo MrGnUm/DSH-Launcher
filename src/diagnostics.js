@@ -112,7 +112,7 @@ async function reportFacts() {
 async function saveReport() {
   let dest = process.env.DSH_LAUNCHER_REPORT_PATH || null;
   if (!dest) {
-    const parent = state.dialogWin && !state.dialogWin.isDestroyed() ? state.dialogWin : state.win;
+    const parent = state.win; // диалог — слой главного окна
     let dir = os.homedir();
     try { dir = app.getPath('downloads'); } catch { /* noop */ }
     const r = await dialog.showSaveDialog(parent, {
