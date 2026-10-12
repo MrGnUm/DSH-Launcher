@@ -73,5 +73,5 @@ def test_agent_finished(start, gui):
     gui.eval("document.getElementById('ask').setAttribute('aria-busy', 'true')")
     gui.eval("document.body.insertAdjacentHTML('beforeend', '<div id=\"q\" data-question-key=\"k2\"></div>')")
     assert launcher.wait_log('агент ждёт: ответ на вопрос', 10), 'вопрос агента'
-    assert launcher.log().count('агент ждёт: подтверждение команды') == 1, 'то же ожидание — один раз'
+    assert launcher.log().count('] агент ждёт: подтверждение команды — ') == 1, 'то же ожидание — сообщено один раз'
     launcher.term()
