@@ -49,6 +49,7 @@ function openDialog(title) {
   wc.on('context-menu', (_e, params) => launcher.showContextMenu(params, state.win, wc));
   wc.on('before-input-event', (e, input) => {
     if (input.type === 'keyDown' && input.key === 'Escape') { e.preventDefault(); closeDialog(); }
+    if (input.type === 'keyUp' && input.key === 'Alt') e.preventDefault(); // фокус не в строку меню (см. main.js)
   });
   wc.on('did-finish-load', () => { if (!wc.isDestroyed()) wc.focus(); });
   state.win.contentView.addChildView(v); // поверх всего: GUI, поиска, плашек

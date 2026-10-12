@@ -686,6 +686,10 @@ async function onReady() {
   } catch { /* noop */ }
   state.win.webContents.on('before-input-event', (event, input) => {
     try {
+      // Одиночный Alt: по его отпусканию Electron на Linux переводит фокус в
+      // строку меню (подсветка «Файл») — из поля ввода dsh. Гасим только это;
+      // Alt+буква и сочетания GUI dsh идут как обычно.
+      if (input.type === 'keyUp' && input.key === 'Alt') { event.preventDefault(); return; }
       if (input.type !== 'keyDown') return;
       const act = keyAction(input);
       if (!act) return;

@@ -15,6 +15,11 @@ The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
   the taskbar or Alt+Tab. Close with the button or Esc. File pickers stay
   native.
 
+### Fixed
+
+- **Alt no longer moves focus to the menu bar.** A lone Alt press highlighted
+  “File” and took focus from the dsh input; Alt shortcuts work as before.
+
 ## [1.12.0] — 2026-10-12
 
 ### Added
