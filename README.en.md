@@ -72,32 +72,39 @@ A small Electron app: a window that opens **DeepSeek Harness**
     “Settings”.
 
 - **Window menu** (always visible; labels follow the window language, RU|EN):
-  - “File” — “Settings…” (Ctrl+,; see below), “Restart dsh…” (e.g. after plugin updates; asks first; a dsh
-    not started by the launcher is left alone) and “Quit” — standard
-    shutdown (stops the dsh the launcher started).
+  - “File” — “Settings…” (Ctrl+,; see below), “Restart dsh…” (e.g. after
+    plugin updates; asks first; a dsh not started by the launcher is left
+    alone) and “Quit” — standard shutdown (stops the dsh the launcher
+    started).
   - “Edit” — “Cut”, “Copy”, “Paste”, “Select all” (same as the context menu;
     Ctrl+X / C / V / A work without the menu too).
   - “View” — reload (F5, Ctrl+Shift+R — ignoring cache), zoom (Ctrl+= /
     Ctrl+− / Ctrl+0, remembered), find in page, spell check (on/off), full
     screen (F11).
-  - “Help” — “Check for updates…” (the latest release on GitHub and the
-    latest `@deepseek-ai/dsh` on npm, shown per component; no auto-install —
-    updating still happens through the startup prompt) — with a “What’s
-    new” block for each newer version, “dsh log” (the latest lines of
-    `dsh.log`, tokens and keys hidden), “Open logs folder”,
-    “About” (the launcher and dsh backend versions, the dsh path, Node.js,
-    OS, GPU acceleration, the logs path; one click copies the whole block to
-    the clipboard for a bug report).
+  - “Help”:
+    - “Check for updates…” — the latest release on GitHub and the latest
+      `@deepseek-ai/dsh` on npm, per component; when there is a newer one —
+      “What’s new” and an “Update” button;
+    - “Roll back to a previous version…” — if a new version doesn’t suit
+      you: a list of past releases (up to five) and a “Roll back” button; the
+      launcher restarts, installs the chosen version the same way as an
+      update and no longer offers the newer one (undo — “Settings →
+      Updates”);
+    - “dsh log…” — the latest lines of `dsh.log`, tokens and keys hidden;
+    - “Open logs folder”, “Save report…” (see “Logs and diagnostics”);
+    - “About” — the launcher and dsh backend versions, the dsh path,
+      Node.js, OS, GPU acceleration, the logs path; one click copies the
+      whole block to the clipboard for a bug report.
 
   “About”, “Check for updates”, “dsh log”, “Settings” and other dialogs open
   inside the launcher window — a card over the dimmed dsh GUI (which isn't
   reloaded). Close with “Close” or Esc.
 
-- **Settings window** (“File → Settings…”, Ctrl+,):
+- **Settings window** (“File → Settings…”, Ctrl+,) — sections in the menu on
+  the left:
   - general — interface language (Auto / Русский / English), spell check;
   - updates — whether to check at startup and every 12 hours (two
-    checkboxes; the second applies at once), “ask again” about postponed
-    versions, whether to offer the marketplace plugin;
+    checkboxes), “ask again” about postponed versions;
   - starting dsh — the dsh program (automatic or a chosen file), profile,
     working folder, port (the launcher passes it to dsh: `--port`);
   - window — “The close button hides the window to the tray” (dsh keeps
@@ -111,8 +118,10 @@ A small Electron app: a window that opens **DeepSeek Harness**
   - graphics — GPU acceleration (Auto / Off, with the current state), window
     on Wayland (Auto / Wayland / X11 — if the window is invisible).
 
-  Language, spell check, marketplace and “ask again” apply at once; the rest
-  — after the launcher restarts (a button in the window). Stored in
+  Language, spell check, the 12-hour check, “ask again”, the tray and the
+  “agent finished” signal apply at once; the rest — after the launcher
+  restarts (a notice with a “Restart the launcher” button at the top of the
+  window). “Saved” and errors pop up in the window corner. Stored in
   `~/.config/dsh-launcher/settings.json`. Environment variables (`DSH_BIN`,
   `DSH_ARGS`, `DSH_CWD`, `DSH_PORT`, `DSH_LAUNCHER_LANG`,
   `DSH_LAUNCHER_NO_UPDATE_CHECK`, `DSH_LAUNCHER_NO_GPU`,
@@ -200,10 +209,13 @@ Defaults are in `src/env.js` and `src/config.js` (and the Settings window), or e
 | `DSH_START_TIMEOUT_MS`  | `120000`                  | how long to wait for startup, ms |
 | `DSH_LAUNCHER_LANG`     | in-window choice / locale | launcher window language: `ru` or `en` |
 | `DSH_LAUNCHER_NO_UPDATE_CHECK` | —             | `1` — skip version checks (GitHub Releases + npm) |
+| `DSH_LAUNCHER_NO_GPU`   | —                         | `1` — no GPU acceleration (software rendering) |
+| `DSH_LAUNCHER_OZONE`    | auto                      | window on Wayland: `wayland` or `x11` (XWayland) |
 
-The language of the launcher's own screens (startup, dsh installation,
-marketplace prompt, updates, errors) can be switched right in the window — **RU|EN**
-in the top-right corner; the choice is saved to
+The language of the launcher's windows (startup, dsh installation,
+marketplace prompt, updates, errors, dialogs) is chosen in Settings or with
+the **RU|EN** switch in the top-right corner of the launcher's pages; the
+choice is saved to
 `~/.config/dsh-launcher/ui-lang.json`. Until a choice is made, the system
 locale is used (`LC_ALL` / `LC_MESSAGES` / `LANG`): `ru*` means Russian,
 anything else English. `DSH_LAUNCHER_LANG=ru|en` forces the language and
@@ -216,16 +228,17 @@ found is remembered in `~/.config/dsh-launcher/dsh-bin.json`. dsh is started
 with its own directory first in `PATH`, so a dsh installed via nvm gets its
 own node even when launched from the desktop shortcut.
 
-The dsh process log is written to `logs/dsh.log`, the launcher’s own log
-(update checks, starting and stopping dsh, errors; timestamped, tokens
-hidden) to `logs/launcher.log`. Both are moved to `*.1` after 2 MB (at
+The dsh process log is written to `dsh.log`, the launcher’s own log (update
+checks, starting and stopping dsh, errors; timestamped, tokens hidden) to
+`launcher.log`: in the installed version — in `~/.local/state/dsh-launcher/`,
+when run from source — in the project’s `logs/`. Both are moved to `*.1` after 2 MB (at
 startup and while running), replacing the previous one: at most four log
 files, ~8 MB, on disk.
 
 ## Keys in the window
 
-The window menu is disabled, so control is via browser-like shortcuts
-(they work with any keyboard layout — RU/EN):
+They work with any keyboard layout (RU/EN); the same actions are in the
+window menu:
 
 | Keys                | Action                      |
 |---------------------|-----------------------------|
@@ -233,8 +246,14 @@ The window menu is disabled, so control is via browser-like shortcuts
 | `Ctrl+Shift+R`      | reload bypassing the cache  |
 | `Ctrl+=` / `Ctrl+-` | zoom in / out one step      |
 | `Ctrl+0`            | reset zoom                  |
+| `Ctrl+F`            | find in page                |
+| `F3` / `Shift+F3`   | next / previous match       |
+| `F11`               | full screen                 |
+| `Ctrl+,`            | Settings                    |
+| `Esc`               | close a dialog or the find bar |
 
-The zoom level is kept between launches.
+The zoom level is kept between launches. A lone `Alt` press doesn’t move
+focus to the menu bar, so it can be used freely in dsh GUI shortcuts.
 
 ## Shortcut (if not installed yet)
 
@@ -264,7 +283,7 @@ cp dsh.desktop ~/Desktop/ && chmod +x ~/Desktop/dsh.desktop   # desktop icon
 # GNOME: right-click the desktop icon → “Allow Launching”
 ```
 
-## Package for Ubuntu 26.04 / 24.04 (.deb)
+## Package for Ubuntu and Debian (.deb)
 
 Ready-made packages are published in the repository's GitHub **Releases** —
 the easiest way is to download the latest `.deb` from there and install it.
@@ -348,18 +367,20 @@ test/docker/run.sh  # scenarios of the installed .deb in Docker: Ubuntu 24.04, 2
 
 The Docker scenarios are written with **pytest** (`test/docker/`):
 
-- `tests/` — the tests by topic (shutdown, updates, menu windows, context
-  menu and find, window size and proxy); a scenario = a test;
-- `helpers/` — window objects (`windows.py`: main window, “About”, update
-  check, log, find bar, update prompt), launching the launcher, processes,
-  the CDP driver;
+- `tests/` — the tests by topic (shutdown, launcher and dsh updates, updates
+  while running, Settings, menu windows, context menu and find, tray, logs,
+  diagnostics, window size and proxy, Wayland); a scenario = a test;
+- `helpers/` — window objects (`windows.py`: main window, dialogs, the
+  notice, find bar, update prompt), launching the launcher, processes, the
+  CDP driver;
 - `fakes/` — a fake dsh and an HTTP proxy;
-- `conftest.py` — fixtures (`start`, `gui`, `prompt`, `drv`) and scenario
-  selection: `pytest --scenario <name>`, `--list-scenarios`.
+- `conftest.py` — fixtures (`start`, `gui`, `prompt`, `drv`, `wayland`) and
+  scenario selection: `pytest --scenario <name>`, `--list-scenarios`.
 
 `run.sh` builds a `.deb` from the current code (as version 1.1.0-1),
 installs it into clean containers and runs one scenario per container under
-Xvfb; the window is driven over the Chromium debugging protocol (CDP). Needs
+Xvfb (the `wayland_*` scenarios — under a headless weston, on Ubuntu 26.04
+only); the window is driven over the Chromium debugging protocol (CDP). Needs
 Docker, a downloaded Electron and network access. Only some scenarios:
 `test/docker/run.sh close find`, only one system: `OSES=26.04`. Logs and
 JUnit reports go to `test/docker/.work/results/`.
@@ -402,7 +423,9 @@ and remove `--no-sandbox` from the last line of `run.sh`.
   are stored on disk (`~/.dsh/.credentials.yaml`, `~/.dsh/sessions/`), so
   the conversation is restored without loss.
 - The window shows an error page with the latest lines of the dsh log.
-- Full log: `logs/dsh.log`; what the launcher did — `logs/launcher.log`.
+- Full logs — “Help → Open logs folder” (`dsh.log` — dsh, `launcher.log` —
+  the launcher); for a bug report, “Help → Save report…” is handier — one
+  archive, tokens and keys hidden.
 - Check that `dsh --profile web --no-open` starts in a terminal and
   prints the URL.
 - The cookie lives in the Electron profile (`~/.config/dsh-launcher`); to
