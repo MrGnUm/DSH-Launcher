@@ -1,7 +1,6 @@
 'use strict';
 // «Вид»: перезагрузка, масштаб, поиск по странице, полный экран, орфография, горячие клавиши.
 const { app, WebContentsView, session } = require('electron');
-const util = require('util');
 const fs = require('fs');
 const path = require('path');
 const state = require('./state');

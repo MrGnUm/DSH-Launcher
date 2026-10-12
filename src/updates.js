@@ -2,7 +2,6 @@
 // Обновления при запуске: проверка, вопрос, скачивание и установка лаунчера и dsh.
 const { app, session, clipboard } = require('electron');
 const { spawn } = require('child_process');
-const util = require('util');
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
@@ -617,8 +616,6 @@ async function offerLauncherUpdate() {
     const choice = auto ? 'install' : await askUpdate(note, noteIsError);
     auto = false;
     if (state.stopping) return;
-    note = null;
-    noteIsError = false;
     if (choice === 'never') {
       updateDismiss('launcher', latest.version);
       return;
@@ -723,8 +720,6 @@ async function offerDshUpdate() {
     const choice = auto ? 'install' : await askUpdate(note, noteIsError);
     auto = false;
     if (state.stopping) return;
-    note = null;
-    noteIsError = false;
     if (choice === 'never') {
       updateDismiss('dsh', latest.version);
       return;

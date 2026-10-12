@@ -4,7 +4,6 @@
 // либо оставшийся жить dsh.
 'use strict';
 const assert = require('assert');
-const { extract } = require('./_extract');
 
 const { pickKillTargets: pick } = require('../src/system');
 const SELF = 100; // группа лаунчера

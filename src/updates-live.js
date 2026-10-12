@@ -1,7 +1,6 @@
 'use strict';
 // Обновления во время работы: проверка раз в 12 часов, плашка, пункт меню, «Обновить сейчас».
 const { WebContentsView, shell } = require('electron');
-const util = require('util');
 const fs = require('fs');
 const state = require('./state');
 const i18n = require('./i18n');

@@ -1,6 +1,5 @@
 'use strict';
 // Страница «dsh не установлен»: команда установки, установка в окне.
-const util = require('util');
 const state = require('./state');
 const i18n = require('./i18n');
 const { tr } = i18n;

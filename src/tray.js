@@ -103,7 +103,8 @@ function onMainWindowClose(e) {
 // в GNOME его нет) и, если включён, звук.
 const AGENT_POLL_MS = 2000;
 let agentRunning = false;
-let agentNotification = null; // ссылка — чтобы уведомление (и его click) не собрал GC
+// eslint-disable-next-line no-unused-vars -- только держит ссылку: иначе уведомление (и его click) соберёт GC
+let agentNotification = null;
 
 function agentSessionTitle() {
   try {

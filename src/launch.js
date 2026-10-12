@@ -1,6 +1,5 @@
 'use strict';
 // Запуск dsh и доведение окна до GUI (вопросы при запуске, ожидание порта).
-const util = require('util');
 const state = require('./state');
 const i18n = require('./i18n');
 const { tr } = i18n;

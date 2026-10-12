@@ -361,7 +361,8 @@ time, so cycles between modules don't get in the way).
 ### Tests
 
 ```sh
-npm test            # unit tests of the src/ modules (test/*.js)
+npm test            # static check (ESLint) and unit tests of the src/ modules (test/*.js)
+npm run lint        # ESLint only: unknown names, unused imports and the like
 test/docker/run.sh  # scenarios of the installed .deb in Docker: Ubuntu 24.04, 26.04, Debian 13
 ```
 

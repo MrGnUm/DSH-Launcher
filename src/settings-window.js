@@ -2,7 +2,6 @@
 // Окно «Настройки»: разделы, сохранение полей, перезапуск лаунчера.
 const { app, dialog } = require('electron');
 const { spawn } = require('child_process');
-const util = require('util');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

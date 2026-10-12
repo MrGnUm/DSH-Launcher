@@ -1,6 +1,5 @@
 'use strict';
 // Окно «Журнал dsh»: последние строки dsh.log, токены скрыты.
-const util = require('util');
 const fs = require('fs');
 const state = require('./state');
 const i18n = require('./i18n');

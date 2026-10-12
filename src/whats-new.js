@@ -1,7 +1,6 @@
 'use strict';
 // «Что нового» после обновления лаунчера.
 const { app } = require('electron');
-const util = require('util');
 const fs = require('fs');
 const path = require('path');
 const state = require('./state');

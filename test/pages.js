@@ -3,7 +3,6 @@
 // pageHtml, retryButton (main.js).
 'use strict';
 const assert = require('assert');
-const fs = require('fs');
 const { spawn } = require('child_process');
 const { extract } = require('./_extract');
 

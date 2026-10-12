@@ -1,15 +1,11 @@
 #!/usr/bin/env node
-// Юнит-тесты «Что нового» (main.js): releaseNotesLang — часть описания релиза
+// Юнит-тесты «Что нового» (src/notes.js, src/versions.js): releaseNotesLang — часть описания релиза
 // на языке окна, notesBetween — какие релизы показать, mdToHtml — безопасный
 // markdown (описания приходят из сети).
 'use strict';
 const assert = require('assert');
-const fs = require('fs');
-const path = require('path');
-const { extract, mainSrc } = require('./_extract');
-
-const { compareDebianVer, compareSemVer, tagToPackageVersion, notesBetween, shouldShowWhatsNew } = require('../src/versions');
-const { esc, redactLog } = require('../src/util');
+const { notesBetween, shouldShowWhatsNew } = require('../src/versions');
+const { redactLog } = require('../src/util');
 const { releaseNotesLang, mdToHtml } = require('../src/notes');
 const { releasesCacheMode: mode, releasesCacheFresh: fresh } = require('../src/updates-logic');
 

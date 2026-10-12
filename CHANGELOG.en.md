@@ -5,6 +5,14 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
 
+## [Unreleased]
+
+### Changed
+
+- **Static code check (ESLint)** — in `npm test` and in CI before every
+  build: unknown names, unused imports, unreachable code. The leftovers of
+  the refactoring it found (unused imports) are removed.
+
 ## [1.13.0] — 2026-10-12
 
 ### Added

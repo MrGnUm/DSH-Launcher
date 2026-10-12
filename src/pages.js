@@ -1,7 +1,6 @@
 'use strict';
 // Служебные страницы в главном окне: общий вид, статусы, страница вставки токена.
 const { app } = require('electron');
-const util = require('util');
 const fs = require('fs');
 const path = require('path');
 const state = require('./state');

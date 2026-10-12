@@ -1,7 +1,6 @@
 'use strict';
 // Окно-диалог поверх главного: открытие, содержимое, закрытие, «О программе», «Проверить обновления…».
 const { WebContentsView, shell, clipboard } = require('electron');
-const util = require('util');
 const os = require('os');
 const state = require('./state');
 const i18n = require('./i18n');

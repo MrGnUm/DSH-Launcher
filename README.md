@@ -353,7 +353,8 @@ sandbox Chromium (`chown root:root` + `chmod 4755 chrome-sandbox`); в этом
 ### Тесты
 
 ```sh
-npm test            # юнит-тесты модулей src/ (test/*.js)
+npm test            # статическая проверка (ESLint) и юнит-тесты модулей src/ (test/*.js)
+npm run lint        # только ESLint: неизвестные имена, неиспользуемые импорты и т. п.
 test/docker/run.sh  # сценарии установленного .deb в Docker: Ubuntu 24.04, 26.04, Debian 13
 ```
 

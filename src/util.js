@@ -65,6 +65,7 @@ function launcherRoute(url) {
 
 function redactLog(text) {
   return String(text || '')
+    // eslint-disable-next-line no-control-regex -- ESC: убираем цветовые коды терминала
     .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '') // ANSI-цвета
     .replace(/([?&](?:token|access_token|key|api_key)=)[^\s&#"'<>]+/gi, '$1***')
     .replace(/(\bBearer\s+)[A-Za-z0-9._~+/=-]{8,}/g, '$1***')

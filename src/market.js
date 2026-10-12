@@ -2,7 +2,6 @@
 // Плагин маркета (dshmarket): вопрос и установка.
 const { app } = require('electron');
 const { spawn } = require('child_process');
-const util = require('util');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');

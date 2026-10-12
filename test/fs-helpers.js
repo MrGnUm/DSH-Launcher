@@ -7,7 +7,6 @@ const fs = require('fs');
 const os = require('os');
 const assert = require('assert');
 const { spawn } = require('child_process');
-const { extract } = require('./_extract');
 
 // ---- writableOrCreatable: W_OK у ближайшего существующего каталога ----
 const { writableOrCreatable, pgidOf } = require('../src/system');
