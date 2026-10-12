@@ -63,6 +63,19 @@ function keyAction(input) {
   return null;
 }
 
+/* Обе Alt-клавиши (нажатие и отпускание), по физическому code — от
+   раскладки не зависит: голый Alt приходит как key="Alt", Shift+Alt
+   (смена раскладки) — как key="GroupNext", AltGr — как key="AltGraph",
+   а code в любом случае AltLeft/AltRight. На Linux Alt переводит фокус
+   в строку меню окна (по нажатию — подсветка, по отпусканию — фокус),
+   поэтому такие события гасятся (preventDefault в обработчиках
+   before-input-event). Смена раскладки не ломается: её состояние ведёт
+   композитор, а altKey на последующих клавишах сохраняется. */
+function isAltKey(input) {
+  return (input.type === 'keyDown' || input.type === 'keyUp') &&
+    (input.code === 'AltLeft' || input.code === 'AltRight');
+}
+
 /* Размер окна из сохранённого состояния: не меньше WIN_MIN и не больше
    рабочей области экрана (монитор могли сменить); мусор — размер по умолчанию. */
 function windowSize(saved, workArea) {
@@ -130,4 +143,4 @@ function crashRestart(history, now, code, signal, max = 3, windowMs = 10 * 60 * 
 }
 /* ===== end crashRestart ===== */
 
-module.exports = { crashRestart, agentEvent, WIN_DEFAULT, WIN_MIN, contextMenuItems, keyAction, windowSize, gpuStatus, reportFileName, reportInfoText };
+module.exports = { crashRestart, agentEvent, WIN_DEFAULT, WIN_MIN, contextMenuItems, keyAction, isAltKey, windowSize, gpuStatus, reportFileName, reportInfoText };
