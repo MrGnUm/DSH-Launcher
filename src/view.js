@@ -43,6 +43,10 @@ const viewActions = {
   findPrev: () => findStep(false),
   fullscreen: () => state.win.setFullScreen(!state.win.isFullScreen()),
   settings: () => launcher.showSettingsDialog(),
+  // passThrough — Alt проглатывается без действия (preventDefault в
+  // обработчике before-input-event), чтобы строка меню окна не перехватывала
+  // фокус; см. keyAction в src/ui.js.
+  passThrough: () => {},
 };
 
 

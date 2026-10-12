@@ -678,6 +678,9 @@ async function onReady() {
   // Клавиши «как в браузере» (F5, Ctrl+R, Ctrl+= / - / 0, Ctrl+F, F3, F11) —
   // keyAction → viewActions; в меню «Вид» те же действия. Ускорители меню
   // не регистрируются — только подсказки, чтобы не перебивать клавиши GUI dsh.
+  // Alt (и Shift+Alt — смена раскладки) проглатывается (passThrough): на
+  // Linux он иначе уводит фокус в строку меню окна; состояние раскладки и
+  // altKey на последующих клавишах при этом не страдает (композитор).
   try {
     const savedZoom = JSON.parse(fs.readFileSync(zoomFile(), 'utf8'));
     if (Number.isFinite(savedZoom.zoomLevel)) {

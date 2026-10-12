@@ -49,9 +49,14 @@ function contextMenuItems(params) {
 }
 
 /* Клавиша → действие «Вида» (имя из viewActions) или null — клавиша
-   странице. code — физическая клавиша, не зависит от раскладки (RU/EN). */
+   странице. code — физическая клавиша, не зависит от раскладки (RU/EN).
+   passThrough — проглотить Alt: иначе он уводит фокус в строку меню окна
+   (known Electron limitation на Linux). Смена раскладки (Shift+Alt) и
+   altKey-модификатор на последующих клавишах не ломаются — состояние
+   модификаторов живёт на уровне композитора, ниже перехвата. */
 function keyAction(input) {
   const c = input.control;
+  if (input.alt && (input.code === 'AltLeft' || input.code === 'AltRight')) return 'passThrough';
   if (input.key === 'F5' || (c && input.code === 'KeyR')) return input.shift ? 'reloadHard' : 'reload';
   if (c && (input.code === 'Equal' || input.code === 'NumpadAdd')) return 'zoomIn';
   if (c && (input.code === 'Minus' || input.code === 'NumpadSubtract')) return 'zoomOut';

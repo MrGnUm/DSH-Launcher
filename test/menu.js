@@ -237,6 +237,10 @@ assert.ok(/win\.webContents\.on\('context-menu',\s*\(_e, params\) => showContext
   assert.strictEqual(k({ control: true, code: 'Comma', key: 'б' }), 'settings', 'Ctrl+, (в русской раскладке — «б»)');
   assert.strictEqual(k({ key: 'f', code: 'KeyF' }), null, 'просто F — странице');
   assert.strictEqual(k({ control: true, code: 'KeyC' }), null, 'Ctrl+C — странице (копирование)');
+  assert.strictEqual(k({ key: 'Alt', code: 'AltLeft', alt: true }), 'passThrough', 'Alt — проглотить, чтобы меню не перехватывало фокус');
+  assert.strictEqual(k({ key: 'Alt', code: 'AltRight', alt: true }), 'passThrough', 'правый Alt');
+  assert.strictEqual(k({ key: 'GroupNext', code: 'AltLeft', alt: true, shift: true }), 'passThrough', 'Shift+Alt (смена раскладки) приходит как GroupNext');
+  assert.strictEqual(k({ key: 'a', code: 'KeyA', alt: true }), null, 'прочие клавиши с Alt — странице (altKey-модификатор сохранён композитором)');
 }
 
 // ---- windowSize: размер окна из сохранённого состояния ----
