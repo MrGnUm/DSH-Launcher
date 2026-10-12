@@ -89,9 +89,9 @@ A small Electron app: a window that opens **DeepSeek Harness**
     OS, GPU acceleration, the logs path; one click copies the whole block to
     the clipboard for a bug report).
 
-  “About” and “Check for updates” open in a small window over the launcher:
-  the dsh GUI underneath is dimmed but not reloaded. Close with “Close”, Esc
-  or the window's close button.
+  “About”, “Check for updates”, “dsh log”, “Settings” and other dialogs open
+  inside the launcher window — a card over the dimmed dsh GUI (which isn't
+  reloaded). Close with “Close” or Esc.
 
 - **Settings window** (“File → Settings…”, Ctrl+,):
   - general — interface language (Auto / Русский / English), spell check;
