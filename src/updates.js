@@ -17,6 +17,8 @@ const { releaseNotesLang, mdToHtml } = require('./notes');
 const { releasesCacheMode, releasesCacheFresh, proxyUrlFromRule, parseRelease } = require('./updates-logic');
 const { GITHUB_TOKEN, UPDATE_NOW, INSTALL_VERSION, CONFIG } = require('./env');
 const { probeDsh, findBin, MIN_NODE_MAJOR, npmInstallInfo } = require('./dsh-install');
+const pages = require('./pages');
+const settingsWindow = require('./settings-window');
 const launcher = require('./launcher'); // общий реестр (наполняет main.js)
 
 /* ---------------- проверка обновлений (лаунчер и dsh) ----------------
@@ -375,7 +377,7 @@ function showUpdatePage(note, noteIsError = false) {
         ${link}
       </div>`;
   }
-  launcher.showStatus(title, body, noteIsError);
+  pages.showStatus(title, body, noteIsError);
 }
 
 // Показывает вопрос (режим ask/manual) и ждёт выбора:
@@ -533,7 +535,7 @@ function restartLauncher() {
   // запуск — через bash (spawnLauncherAfterExit): нет программы — узнаём здесь,
   // а не по 'error' (bash-то есть)
   try { fs.accessSync(exe, fs.constants.X_OK); } catch (e) { fail(e); return; }
-  const p = launcher.spawnLauncherAfterExit(exe, [], 'ignore');
+  const p = settingsWindow.spawnLauncherAfterExit(exe, [], 'ignore');
   p.on('spawn', () => { started = true; });
   p.on('error', fail);
   p.unref();
@@ -791,4 +793,4 @@ async function offerDshUpdate() {
   }
 }
 
-module.exports = { DSH_NPM_PKG, UPDATE_GITHUB_REPO, UPDATE_CHECK_TIMEOUT, NO_UPDATE_CHECK, launcherInstalledVersion, fetchLauncherLatest, notesBlockHtml, fetchDshLatest, startUpdateChecks, updateState, updatePrefFile, updatePrefs, onUpdateChoice, restartLauncher, offerLauncherUpdate, offerDshUpdate };
+Object.assign(module.exports, { DSH_NPM_PKG, UPDATE_GITHUB_REPO, UPDATE_CHECK_TIMEOUT, NO_UPDATE_CHECK, launcherInstalledVersion, fetchLauncherLatest, notesBlockHtml, fetchDshLatest, startUpdateChecks, updateState, updatePrefFile, updatePrefs, onUpdateChoice, restartLauncher, offerLauncherUpdate, offerDshUpdate }); // дополняем, а не заменяем: модули подключают друг друга по кругу

@@ -77,6 +77,7 @@ def test_settings_validation(start, gui):
 
     settings.set('port', '80')
     settings.wait_note('The port must be a number from 1024 to 65535')
+    assert settings.note_inside_card(), 'сообщение — в углу карточки, а не всего окна'
     settings.set('profile', 'a%20b')
     settings.wait_note('The profile may contain Latin letters')
 

@@ -8,6 +8,11 @@ const { tr } = i18n;
 const { esc, timedCheck } = require('./util');
 const { updateStatus, notesBetween } = require('./versions');
 const { LOG_DIR } = require('./env');
+const fileHelp = require('./file-help');
+const menus = require('./menus');
+const pages = require('./pages');
+const updatesLive = require('./updates-live');
+const updates = require('./updates');
 const launcher = require('./launcher'); // общий реестр (наполняет main.js)
 
 /* ---------------- окно-диалог: «О программе», «Проверить обновления» ---------------- */
@@ -45,7 +50,7 @@ function openDialog(title) {
     if (/^https?:/i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  wc.on('context-menu', (_e, params) => launcher.showContextMenu(params, state.win, wc));
+  wc.on('context-menu', (_e, params) => menus.showContextMenu(params, state.win, wc));
   wc.on('before-input-event', (e, input) => {
     if (input.type === 'keyDown' && input.key === 'Escape') { e.preventDefault(); closeDialog(); }
     if (input.type === 'keyUp' && input.key === 'Alt') e.preventDefault(); // фокус не в строку меню (см. main.js)
@@ -79,7 +84,7 @@ function dialogShow(gen, render) {
 
 function dialogPage(title, body) {
   if (!dialogOpen()) return;
-  state.dialogView.webContents.loadURL(launcher.pageHtml(title, body, false, { dialog: true }))
+  state.dialogView.webContents.loadURL(pages.pageHtml(title, body, false, { dialog: true }))
     .catch((e) => { if (e.code !== 'ERR_ABORTED') console.error('[launcher] диалог:', e.message); });
 }
 
@@ -103,7 +108,7 @@ async function showAboutDialog() {
   if (gen === null) return;
   const ver = { lver: null, dver: null, loaded: false };
   const render = (copied) => {
-    const gpu = launcher.gpuStatusNow();
+    const gpu = fileHelp.gpuStatusNow();
     const fromSrc = !process.execPath.startsWith('/opt/dsh-launcher/');
     const lLabel = fromSrc ? tr(' (сборка из исходников)', ' (built from source)') : '';
     const lDisp = ver.loaded ? (ver.lver || tr('неизвестно', 'unknown')) : tr('загружаю…', 'loading…');
@@ -114,7 +119,7 @@ async function showAboutDialog() {
       [tr('путь к dsh', 'path to dsh'), state.dshBin || '—'],
       ['Node.js', 'v' + process.versions.node],
       [tr('ОС', 'OS'), os.platform() + ' ' + os.release() + ' (' + os.arch() + ')'],
-      [tr('GPU-ускорение', 'GPU acceleration'), launcher.gpuStatusText(gpu)],
+      [tr('GPU-ускорение', 'GPU acceleration'), fileHelp.gpuStatusText(gpu)],
       [tr('логи', 'logs'), LOG_DIR],
     ];
     state.dialogCopyText = ver.loaded ? rows.map(([k, v]) => k + ': ' + v).join('\n') : '';
@@ -139,7 +144,7 @@ async function showAboutDialog() {
   };
   dialogShow(gen, render);
   // Версии подставим, когда придут (dsh --version может занять до 8 с)
-  const [lver, dver] = await Promise.all([launcher.launcherVersionRaw(), launcher.dshVersionRaw()]);
+  const [lver, dver] = await Promise.all([menus.launcherVersionRaw(), menus.dshVersionRaw()]);
   Object.assign(ver, { lver, dver, loaded: true });
   dialogShow(gen, render);
 }
@@ -153,18 +158,18 @@ async function showUpdateCheckDialog() {
     '<p>' + tr('Проверяю…', 'Checking…') + '</p>' +
     '<div class="actions">' + dialogCloseButton() + '</div>'));
   const [latestL, latestD] = await Promise.all([
-    timedCheck(launcher.fetchLauncherLatest({ force: true }), launcher.UPDATE_CHECK_TIMEOUT),
-    timedCheck(launcher.fetchDshLatest(), launcher.UPDATE_CHECK_TIMEOUT),
+    timedCheck(updates.fetchLauncherLatest({ force: true }), updates.UPDATE_CHECK_TIMEOUT),
+    timedCheck(updates.fetchDshLatest(), updates.UPDATE_CHECK_TIMEOUT),
   ]);
-  const [lver, dver] = await Promise.all([launcher.launcherVersionRaw(), launcher.dshVersionRaw()]);
+  const [lver, dver] = await Promise.all([menus.launcherVersionRaw(), menus.dshVersionRaw()]);
   const isSrc = !process.execPath.startsWith('/opt/dsh-launcher/');
   const lSt = updateStatus(latestL && latestL.version, lver, isSrc ? 'semver' : 'deb');
   const dSt = updateStatus(latestD && latestD.version, dver, 'semver');
   // найденное — и в меню «Справка» (уведомлять не нужно: окно и так открыто)
   const canL = lSt === 'available' && !isSrc && Boolean(lver);
   const canD = dSt === 'available' && Boolean(dver);
-  if (!launcher.NO_UPDATE_CHECK || canL || canD) {
-    launcher.setAvailableUpdates({
+  if (!updates.NO_UPDATE_CHECK || canL || canD) {
+    updatesLive.setAvailableUpdates({
       ...(canL ? { launcher: { version: latestL.version, installed: lver, releases: latestL.releases } } : {}),
       ...(canD ? { dsh: { version: latestD.version, installed: dver } } : {}),
     }, false);
@@ -191,7 +196,7 @@ async function showUpdateCheckDialog() {
         ${row('DeepSeek Harness Launcher', lver, lStatus)}
         ${row(tr('бэкенд dsh', 'dsh backend'), dver, dStatus)}
       </table>
-      ${lSt === 'available' ? launcher.notesBlockHtml(notesBetween(latestL.releases, lver, latestL.version, isSrc ? 'semver' : 'deb')) : ''}
+      ${lSt === 'available' ? updates.notesBlockHtml(notesBetween(latestL.releases, lver, latestL.version, isSrc ? 'semver' : 'deb')) : ''}
       ${canL || canD ? '<p class="hint">' + tr('«Обновить» перезапустит лаунчер, dsh будет остановлен — незаконченный ответ агента прервётся.',
         '“Update” restarts the launcher and stops dsh — an unfinished agent reply will be interrupted.') + '</p>' : ''}
       <div class="actions">
@@ -203,4 +208,4 @@ async function showUpdateCheckDialog() {
   });
 }
 
-module.exports = { openDialog, closeDialog, dialogOpen, dialogShow, dialogPage, dialogCloseButton, onDialogClose, onDialogCopy, showAboutDialog, showUpdateCheckDialog };
+Object.assign(module.exports, { openDialog, closeDialog, dialogOpen, dialogShow, dialogPage, dialogCloseButton, onDialogClose, onDialogCopy, showAboutDialog, showUpdateCheckDialog }); // дополняем, а не заменяем: модули подключают друг друга по кругу

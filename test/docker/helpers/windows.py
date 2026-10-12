@@ -226,6 +226,13 @@ class SettingsDialog(Dialog):
         """Изменить поле (как это делает само окно при изменении поля)."""
         self.go(f'dshlauncher://settings/set/?k={key}&v={value}')
 
+    def note_inside_card(self):
+        """Всплывающее «Сохранено»/ошибка — внутри карточки диалога (не в углу окна)."""
+        return bool(self.drv.eval("(() => { const p = document.querySelector('.pop'), w = document.querySelector('.wrap');"
+                                  " if (!p || !w) return false; const a = p.getBoundingClientRect(), b = w.getBoundingClientRect();"
+                                  " return a.left >= b.left && a.right <= b.right && a.top >= b.top && a.bottom <= b.bottom; })()",
+                                  page=self.TITLE))
+
     def active_section(self):
         """Какой раздел выбран в меню слева (и его содержимое показано)."""
         return self.drv.eval("(() => { const a = document.querySelector('.sett nav a.on');"

@@ -9,6 +9,7 @@ const { tr } = i18n;
 const { DSH_ARGS, CWD, LOG_DIR, LOG_FILE } = require('./env');
 const { rotateLog, openDshLog } = require('./log');
 const { dshEnv } = require('./dsh-install');
+const pages = require('./pages');
 const launcher = require('./launcher'); // общий реестр (наполняет main.js)
 
 /* ---------------- запуск процесса dsh ---------------- */
@@ -104,7 +105,7 @@ async function handleDshExit(code, signal) {
   if (adoptionCheck) return; // на всякий случай: один цикл проверки
   adoptionCheck = true;
   try {
-    launcher.showPage(() => launcher.showStatus(tr('dsh перезапускается…', 'dsh is restarting…'), tr(
+    pages.showPage(() => pages.showStatus(tr('dsh перезапускается…', 'dsh is restarting…'), tr(
       `<p>Процесс <code>dsh</code> завершился (code=${code}).<br>
          Проверяю, не запустился ли новый процесс…</p>`,
       `<p>The <code>dsh</code> process exited (code=${code}).<br>
@@ -127,11 +128,11 @@ async function handleDshExit(code, signal) {
     adoptionCheck = false;
   }
   if (state.win && !state.win.isDestroyed() && !state.stopping) {
-    launcher.showPage(() => launcher.showStatus(tr('dsh остановился', 'dsh has stopped'), tr(
+    pages.showPage(() => pages.showStatus(tr('dsh остановился', 'dsh has stopped'), tr(
       `<p>Процесс DeepSeek Harness завершился, и за 8 секунд новый процесс
          не запустился.</p>`,
       `<p>The DeepSeek Harness process exited, and no new process started
-         within 8 seconds.</p>`) + retryButton() + launcher.stderrBlock(), true));
+         within 8 seconds.</p>`) + retryButton() + pages.stderrBlock(), true));
   }
 }
 
@@ -141,4 +142,4 @@ function retryButton() {
 }
 /* ===== end retryButton ===== */
 
-module.exports = { CLOSE_INHERITED_FDS, startDsh, retryButton };
+Object.assign(module.exports, { CLOSE_INHERITED_FDS, startDsh, retryButton }); // дополняем, а не заменяем: модули подключают друг друга по кругу

@@ -126,23 +126,18 @@ assert.ok(/win\.webContents\.on\('context-menu',\s*\(_e, params\) => showContext
 {
   const calls = [];
   const viewActions = new Proxy({}, { get: (_t, k) => () => calls.push('view.' + String(k)) });
-  // функции других частей лаунчера — через реестр launcher (заглушки)
   const mk = (tr, spellcheckOn = true, availableUpdates = {}) => extract('appMenuTemplate', {
     tr,
     state: { availableUpdates, spellcheckOn },
-    launcher: {
-      showUpdateNowDialog: (kind) => calls.push('update:' + kind),
-      viewActions,
-      showAboutDialog: () => calls.push('about'),
-      showUpdateCheckDialog: () => calls.push('check'),
-      showRollbackDialog: () => calls.push('rollback'),
-      openLogsFolder: () => calls.push('logs'),
-      saveReport: () => calls.push('report'),
-      restartDsh: () => calls.push('restart'),
-      setSpellcheck: (on) => calls.push('spell:' + on),
-      showLogDialog: () => calls.push('log'),
-      showSettingsDialog: () => calls.push('settings'),
-    },
+    // модули, к которым обращается меню (заглушки)
+    updatesLive: { showUpdateNowDialog: (kind) => calls.push('update:' + kind) },
+    view: { viewActions, setSpellcheck: (on) => calls.push('spell:' + on) },
+    dialogs: { showAboutDialog: () => calls.push('about'), showUpdateCheckDialog: () => calls.push('check') },
+    rollback: { showRollbackDialog: () => calls.push('rollback') },
+    fileHelp: { openLogsFolder: () => calls.push('logs'), restartDsh: () => calls.push('restart') },
+    diagnostics: { saveReport: () => calls.push('report') },
+    dshLog: { showLogDialog: () => calls.push('log') },
+    settingsWindow: { showSettingsDialog: () => calls.push('settings') },
   })();
   const ru = mk((r) => r);
   const en = mk((r, e) => e);

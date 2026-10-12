@@ -354,9 +354,11 @@ restarts, shutdown. Everything else is in `src/` modules:
 | `menus.js`, `view.js`, `file-help.js`, `window-state.js`, `tray.js` | menus, “View” and find, “File/Help”, window size, tray |
 | `util.js`, `system.js`, `ui.js` | pure functions: argument parsing, processes and ports, menu items, shortcuts |
 
-The pure functions are covered by unit tests (`test/*.js`); modules use each
-other through `launcher.<function>()` and `state.<field>` (resolved at call
-time, so cycles between modules don't get in the way).
+The pure functions are covered by unit tests (`test/*.js`). Modules require
+each other as usual and call `pages.showPage()` and the like; shared state
+is `state.<field>`. Stateful modules extend their `module.exports` instead of
+replacing it, so cycles between them don't get in the way. The few things
+that live in `main.js` reach modules through the `launcher.<name>` registry.
 
 ### Tests
 

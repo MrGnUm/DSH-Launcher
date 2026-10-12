@@ -73,4 +73,4 @@ async function stopAdoptedDsh() {
   for (const t of alive()) killGroup(t.id, 'SIGKILL', t.groupOnly);
 }
 
-module.exports = { killGroup, dshLeaderExited, stopDsh, adoptedTargets, stopAdoptedDsh };
+Object.assign(module.exports, { killGroup, dshLeaderExited, stopDsh, adoptedTargets, stopAdoptedDsh }); // дополняем, а не заменяем: модули подключают друг друга по кругу

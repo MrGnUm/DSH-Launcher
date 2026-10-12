@@ -12,6 +12,7 @@ const { esc, profileFromArgs } = require('./util');
 const { envWithBinDir } = require('./system');
 const { DSH_ARGS, CWD } = require('./env');
 const { dshEnv, findBin, npmInstallInfo } = require('./dsh-install');
+const pages = require('./pages');
 const launcher = require('./launcher'); // общий реестр (наполняет main.js)
 
 /* ---------------- плагин маркета (dshmarket) ----------------
@@ -86,7 +87,7 @@ function showMarketPage(note, noteIsError = false) {
          <button onclick="location.href='dshlauncher://market/skip/'">${tr('Не сейчас', 'Not now')}</button>
          <button onclick="location.href='dshlauncher://market/never/'">${tr('Не спрашивать больше', 'Don’t ask again')}</button>
        </div>`;
-  launcher.showStatus(installing ? tr(`Устанавливаю ${MARKET_PKG}…`, `Installing ${MARKET_PKG}…`)
+  pages.showStatus(installing ? tr(`Устанавливаю ${MARKET_PKG}…`, `Installing ${MARKET_PKG}…`)
     : tr(`Установить ${MARKET_PKG}?`, `Install ${MARKET_PKG}?`), body, noteIsError);
 }
 
@@ -210,4 +211,4 @@ async function offerMarketIfMissing() {
   }
 }
 
-module.exports = { marketState, onMarketChoice, offerMarketIfMissing };
+Object.assign(module.exports, { marketState, onMarketChoice, offerMarketIfMissing }); // дополняем, а не заменяем: модули подключают друг друга по кругу

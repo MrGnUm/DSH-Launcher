@@ -7,27 +7,29 @@ const state = require('./state');
 const { tr } = require('./i18n');
 const { esc, timedCheck } = require('./util');
 const { rollbackCandidates } = require('./updates-logic');
-const launcher = require('./launcher'); // общий реестр (наполняет main.js)
+const dialogs = require('./dialogs');
+const settingsWindow = require('./settings-window');
+const updates = require('./updates');
 
 let candidates = [];
 
 async function showRollbackDialog() {
   const title = tr('Вернуть предыдущую версию', 'Roll back to a previous version');
-  const gen = launcher.openDialog(title);
+  const gen = dialogs.openDialog(title);
   if (gen === null) return;
   state.dialogCopyText = '';
-  launcher.dialogShow(gen, () => launcher.dialogPage(title,
-    `<p>${tr('Загружаю список версий…', 'Loading the list of versions…')}</p><div class="actions">${launcher.dialogCloseButton()}</div>`));
-  const installed = await launcher.launcherInstalledVersion();
+  dialogs.dialogShow(gen, () => dialogs.dialogPage(title,
+    `<p>${tr('Загружаю список версий…', 'Loading the list of versions…')}</p><div class="actions">${dialogs.dialogCloseButton()}</div>`));
+  const installed = await updates.launcherInstalledVersion();
   let latest = null;
-  if (installed) latest = await timedCheck(launcher.fetchLauncherLatest(), launcher.UPDATE_CHECK_TIMEOUT);
+  if (installed) latest = await timedCheck(updates.fetchLauncherLatest(), updates.UPDATE_CHECK_TIMEOUT);
   candidates = latest && latest.all ? rollbackCandidates(latest.all, installed) : [];
-  launcher.dialogShow(gen, () => {
+  dialogs.dialogShow(gen, () => {
     let body;
     if (!installed) {
       body = `<p>${tr('Лаунчер запущен не из пакета .deb — вернуть версию можно, только установив нужный пакет со',
         'The launcher is not running from a .deb package — to roll back, install the package you need from the')}
-        <a href="https://github.com/${esc(launcher.UPDATE_GITHUB_REPO)}/releases" target="_blank">${tr('страницы релизов', 'releases page')}</a>.</p>`;
+        <a href="https://github.com/${esc(updates.UPDATE_GITHUB_REPO)}/releases" target="_blank">${tr('страницы релизов', 'releases page')}</a>.</p>`;
     } else if (!latest) {
       body = `<p class="note err">${tr('Не удалось получить список версий с GitHub.', 'Could not get the list of versions from GitHub.')}</p>`;
     } else if (!candidates.length) {
@@ -47,7 +49,7 @@ async function showRollbackDialog() {
         <p class="hint">${tr('Лаунчер перезапустится и установит выбранную версию (нужен пароль администратора), dsh будет остановлен. О более новой версии лаунчер спрашивать не будет — это можно вернуть в «Настройки → Обновления».',
           'The launcher will restart and install the chosen version (the administrator password is needed), dsh will be stopped. The launcher won’t offer the newer version again — this can be undone in “Settings → Updates”.')}</p>`;
     }
-    launcher.dialogPage(title, `${body}<div class="actions">${launcher.dialogCloseButton()}</div>`);
+    dialogs.dialogPage(title, `${body}<div class="actions">${dialogs.dialogCloseButton()}</div>`);
   });
 }
 
@@ -56,7 +58,7 @@ function rollbackTo(version) {
   if (!candidates.some((c) => c.version === version)) return;
   process.env.DSH_LAUNCHER_UPDATE_NOW = 'launcher';
   process.env.DSH_LAUNCHER_INSTALL_VERSION = version;
-  launcher.relaunchLauncher(`чтобы вернуть версию ${version}`);
+  settingsWindow.relaunchLauncher(`чтобы вернуть версию ${version}`);
 }
 
-module.exports = { showRollbackDialog, rollbackTo };
+Object.assign(module.exports, { showRollbackDialog, rollbackTo }); // дополняем, а не заменяем: модули подключают друг друга по кругу

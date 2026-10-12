@@ -8,7 +8,9 @@ const i18n = require('./i18n');
 const { tr } = i18n;
 const { esc, timedCheck } = require('./util');
 const { tagToPackageVersion, shouldShowWhatsNew, notesBetween } = require('./versions');
-const launcher = require('./launcher'); // общий реестр (наполняет main.js)
+const dialogs = require('./dialogs');
+const menus = require('./menus');
+const updates = require('./updates');
 
 /* ---------------- «Что нового» после обновления ---------------- */
 
@@ -34,13 +36,13 @@ function saveLastVersion(v) {
 async function maybeShowWhatsNew() {
   if (whatsNewChecked) return;
   whatsNewChecked = true;
-  const current = await launcher.launcherVersionRaw();
+  const current = await menus.launcherVersionRaw();
   if (!current) return;
   let last = null;
   try { last = JSON.parse(fs.readFileSync(lastVersionFile(), 'utf8')).version || null; } catch { /* первый запуск */ }
   const scheme = process.execPath.startsWith('/opt/dsh-launcher/') ? 'deb' : 'semver';
   if (!shouldShowWhatsNew(last, current, scheme)) { saveLastVersion(current); return; }
-  if (launcher.NO_UPDATE_CHECK) { saveLastVersion(current); return; } // в сеть ходить нельзя — молча
+  if (updates.NO_UPDATE_CHECK) { saveLastVersion(current); return; } // в сеть ходить нельзя — молча
   let latest = await state.updateChecks.launcher;
   // Список релизов из кэша (до часа) мог быть получен до выхода этой версии
   // (например, пакет поставили через apt) — тогда её описания в нём нет:
@@ -49,21 +51,21 @@ async function maybeShowWhatsNew() {
     (scheme === 'deb' ? tagToPackageVersion(r.version) : r.version) === current);
   if (latest && !hasCurrent(latest)) {
     console.log(`[launcher] в кэше релизов нет ${current} — запрашиваю список заново`);
-    latest = (await timedCheck(launcher.fetchLauncherLatest({ force: true }), launcher.UPDATE_CHECK_TIMEOUT)) || latest;
+    latest = (await timedCheck(updates.fetchLauncherLatest({ force: true }), updates.UPDATE_CHECK_TIMEOUT)) || latest;
   }
   if (!latest || !latest.releases) return; // нет ответа GitHub — покажем в следующий раз
   const items = notesBetween(latest.releases, last, current, scheme);
   console.log(`[launcher] обновлён ${last} → ${current} — показываю «Что нового» (${items.length})`);
   saveLastVersion(current);
   const title = tr('Что нового', 'What’s new');
-  const gen = launcher.openDialog(title);
+  const gen = dialogs.openDialog(title);
   if (gen === null) return;
   state.dialogCopyText = '';
-  const link = `https://github.com/${launcher.UPDATE_GITHUB_REPO}/releases`;
-  launcher.dialogShow(gen, () => launcher.dialogPage(title, `
+  const link = `https://github.com/${updates.UPDATE_GITHUB_REPO}/releases`;
+  dialogs.dialogShow(gen, () => dialogs.dialogPage(title, `
     <p style="margin:0 0 4px">${tr('DeepSeek Harness Launcher обновлён:', 'DeepSeek Harness Launcher was updated:')} <code>${esc(last)}</code> → <code>${esc(current)}</code></p>
-    ${launcher.notesBlockHtml(items) || `<p>${tr('Подробности — на', 'Details are on the')} <a href="${esc(link)}" target="_blank">${tr('странице релизов', 'releases page')}</a>.</p>`}
-    <div class="actions">${launcher.dialogCloseButton()}</div>`));
+    ${updates.notesBlockHtml(items) || `<p>${tr('Подробности — на', 'Details are on the')} <a href="${esc(link)}" target="_blank">${tr('странице релизов', 'releases page')}</a>.</p>`}
+    <div class="actions">${dialogs.dialogCloseButton()}</div>`));
 }
 
-module.exports = { maybeShowWhatsNew };
+Object.assign(module.exports, { maybeShowWhatsNew }); // дополняем, а не заменяем: модули подключают друг друга по кругу

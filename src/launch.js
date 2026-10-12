@@ -5,6 +5,11 @@ const i18n = require('./i18n');
 const { tr } = i18n;
 const { esc } = require('./util');
 const { DSH_ARGS, PLAIN_URL } = require('./env');
+const dshProcess = require('./dsh-process');
+const market = require('./market');
+const pages = require('./pages');
+const updatesLive = require('./updates-live');
+const updates = require('./updates');
 const launcher = require('./launcher'); // общий реестр (наполняет main.js)
 
 /* ---------------- запуск dsh и доведение окна до GUI ---------------- */
@@ -25,13 +30,13 @@ async function launchDsh() {
   }
   state.launching = true;
   try {
-    if (await launcher.offerLauncherUpdate()) return; // перезапуск в новую версию — dsh поднимет она
+    if (await updates.offerLauncherUpdate()) return; // перезапуск в новую версию — dsh поднимет она
     if (state.stopping) return;
-    await launcher.offerDshUpdate();
+    await updates.offerDshUpdate();
     if (state.stopping) return;
-    await launcher.offerMarketIfMissing();
+    await market.offerMarketIfMissing();
     if (state.stopping) return;
-    void launcher.refreshAvailableUpdates(); // отложенное обновление — пунктом в «Справке»
+    void updatesLive.refreshAvailableUpdates(); // отложенное обновление — пунктом в «Справке»
     await launchDshInner();
   } finally {
     state.launching = false;
@@ -39,14 +44,14 @@ async function launchDsh() {
 }
 
 async function launchDshInner() {
-  launcher.showPage(() => launcher.showStatus(tr('Запуск DeepSeek Harness…', 'Starting DeepSeek Harness…'), tr(
+  pages.showPage(() => pages.showStatus(tr('Запуск DeepSeek Harness…', 'Starting DeepSeek Harness…'), tr(
     `<p>Запускаю <code>${esc(state.dshBin)} ${esc(DSH_ARGS.join(' '))}</code>.<br>Жду, пока сервис поднимется…</p>`,
     `<p>Running <code>${esc(state.dshBin)} ${esc(DSH_ARGS.join(' '))}</code>.<br>Waiting for the service to come up…</p>`)));
-  launcher.startDsh();
+  dshProcess.startDsh();
 
   const up = await launcher.waitForPort();
   if (!up) {
-    launcher.showPage(() => launcher.showStatus(tr('Не удалось запустить dsh', 'Failed to start dsh'), tr(
+    pages.showPage(() => pages.showStatus(tr('Не удалось запустить dsh', 'Failed to start dsh'), tr(
       `<p>Процесс не поднял сервис на <code>${PLAIN_URL}</code>.<br>
          Проверьте, что команда запускается в терминале:
          <code>${esc(state.dshBin)} ${esc(DSH_ARGS.join(' '))}</code>.<br>
@@ -54,7 +59,7 @@ async function launchDshInner() {
       `<p>The process did not bring up the service at <code>${PLAIN_URL}</code>.<br>
          Check that the command runs in a terminal:
          <code>${esc(state.dshBin)} ${esc(DSH_ARGS.join(' '))}</code>.<br>
-         Latest log lines:</p>`) + launcher.stderrBlock(), true));
+         Latest log lines:</p>`) + pages.stderrBlock(), true));
     launcher.startWatchdog(); // если dsh запустят вручную — окно оживёт само
     return;
   }
@@ -64,13 +69,13 @@ async function launchDshInner() {
   state.portState = 'up';
   const url = state.authUrl || (await launcher.waitForAuthUrl());
   if (url) {
-    await launcher.loadInWin(url); // обмен токена на куки, затем редирект на чистый URL
+    await pages.loadInWin(url); // обмен токена на куки, затем редирект на чистый URL
   } else if (await launcher.plainUrlIsAuthed()) {
-    await launcher.loadInWin(PLAIN_URL); // старое куки ещё валидно
+    await pages.loadInWin(PLAIN_URL); // старое куки ещё валидно
   } else {
-    launcher.showPastePage();
+    pages.showPastePage();
   }
   launcher.startWatchdog();
 }
 
-module.exports = { launchDsh, launchDshInner };
+Object.assign(module.exports, { launchDsh, launchDshInner }); // дополняем, а не заменяем: модули подключают друг друга по кругу

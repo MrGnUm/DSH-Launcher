@@ -14,7 +14,12 @@ const { tr } = i18n;
 const { esc, redactLog } = require('./util');
 const { reportFileName, reportInfoText } = require('./ui');
 const { loadSettings, CONFIG, DSH_ARGS, CWD, PORT, LOG_FILE, LAUNCHER_LOG_FILE } = require('./env');
-const launcher = require('./launcher'); // общий реестр (наполняет main.js)
+const dialogs = require('./dialogs');
+const dshLog = require('./dsh-log');
+const fileHelp = require('./file-help');
+const menus = require('./menus');
+const updatesLive = require('./updates-live');
+const updates = require('./updates');
 
 /* ---------------- прошлый запуск: завершился ли штатно ---------------- */
 
@@ -64,7 +69,7 @@ function maybeShowCrashNotice() {
   console.log('[launcher] уведомление: прошлый запуск завершился аварийно');
   let when = '';
   try { when = new Date(m.startedAt).toLocaleString(i18n.getLang() === 'ru' ? 'ru-RU' : 'en-US'); } catch { /* noop */ }
-  launcher.showToast(launcher.toastPageUrl({
+  updatesLive.showToast(updatesLive.toastPageUrl({
     title: tr('В прошлый раз лаунчер завершился аварийно', 'The launcher closed unexpectedly last time'),
     sub: when ? tr(`запуск от ${when}`, `started ${when}`) : '',
     buttons: [
@@ -83,7 +88,7 @@ function maybeShowCrashNotice() {
 
 
 async function reportFacts() {
-  const [lver, dver] = await Promise.all([launcher.launcherVersionRaw(), launcher.dshVersionRaw()]);
+  const [lver, dver] = await Promise.all([menus.launcherVersionRaw(), menus.dshVersionRaw()]);
   let osName = '';
   try { osName = (/^PRETTY_NAME="?([^"\n]*)/m.exec(fs.readFileSync('/etc/os-release', 'utf8')) || [])[1] || ''; } catch { /* noop */ }
   return [
@@ -97,7 +102,7 @@ async function reportFacts() {
     [tr('рабочий стол', 'desktop'), process.env.XDG_CURRENT_DESKTOP],
     [tr('сессия', 'session'), process.env.XDG_SESSION_TYPE],
     [tr('режим окна', 'window mode'), app.commandLine.getSwitchValue('ozone-platform') || 'x11'],
-    [tr('GPU-ускорение', 'GPU acceleration'), launcher.gpuStatusText(launcher.gpuStatusNow())],
+    [tr('GPU-ускорение', 'GPU acceleration'), fileHelp.gpuStatusText(fileHelp.gpuStatusNow())],
     [tr('язык окна', 'window language'), i18n.getLang()],
     [tr('путь к dsh', 'path to dsh'), state.dshBin],
     [tr('аргументы dsh', 'dsh arguments'), DSH_ARGS.join(' ')],
@@ -133,7 +138,7 @@ async function saveReport() {
     for (const f of [LAUNCHER_LOG_FILE + '.1', LAUNCHER_LOG_FILE]) {
       try { put(path.basename(f), fs.readFileSync(f, 'utf8')); } catch { /* нет файла */ }
     }
-    const dshTail = launcher.logTail(LOG_FILE, 5000, 1024 * 1024);
+    const dshTail = dshLog.logTail(LOG_FILE, 5000, 1024 * 1024);
     if (dshTail !== null) put('dsh.log.tail', dshTail + '\n');
     put('settings.json', JSON.stringify(loadSettings() || {}, null, 2) + '\n');
     try { put('gpu.json', JSON.stringify(app.getGPUFeatureStatus(), null, 2) + '\n'); } catch { /* noop */ }
@@ -151,20 +156,20 @@ async function saveReport() {
 
 function showReportDialog(error) {
   const title = tr('Отчёт', 'Report');
-  const gen = launcher.openDialog(title);
+  const gen = dialogs.openDialog(title);
   if (gen === null) return;
   state.dialogCopyText = '';
-  launcher.dialogShow(gen, () => launcher.dialogPage(title, error
+  dialogs.dialogShow(gen, () => dialogs.dialogPage(title, error
     ? `<p class="note err">${esc(tr('Не удалось сохранить отчёт: ', 'Could not save the report: ') + error)}</p>
-       <div class="actions">${launcher.dialogCloseButton()}</div>`
+       <div class="actions">${dialogs.dialogCloseButton()}</div>`
     : `<p>${tr('Отчёт сохранён:', 'Report saved:')} <code>${esc(state.lastReportPath)}</code></p>
        <p class="hint">${tr('Токены и ключи в нём скрыты. Приложите файл к сообщению о проблеме на',
                             'Tokens and keys in it are hidden. Attach the file to an issue on')}
-         <a href="https://github.com/${launcher.UPDATE_GITHUB_REPO}/issues/new" target="_blank">GitHub</a>.</p>
+         <a href="https://github.com/${updates.UPDATE_GITHUB_REPO}/issues/new" target="_blank">GitHub</a>.</p>
        <div class="actions">
          <button onclick="location.href='dshlauncher://dialog/report-show/'">${tr('Показать в папке', 'Show in folder')}</button>
-         ${launcher.dialogCloseButton()}
+         ${dialogs.dialogCloseButton()}
        </div>`));
 }
 
-module.exports = { checkPreviousRun, clearRunMarker, maybeShowCrashNotice, saveReport };
+Object.assign(module.exports, { checkPreviousRun, clearRunMarker, maybeShowCrashNotice, saveReport }); // дополняем, а не заменяем: модули подключают друг друга по кругу

@@ -10,6 +10,12 @@ const { compareDebianVer, compareSemVer, tagToPackageVersion, notesBetween } = r
 const { updatePollMs, announceUpdates } = require('./updates-logic');
 const { LOG_DIR, LAUNCHER_LOG_FILE } = require('./env');
 const { probeDsh } = require('./dsh-install');
+const diagnostics = require('./diagnostics');
+const dialogs = require('./dialogs');
+const menus = require('./menus');
+const settingsWindow = require('./settings-window');
+const updates = require('./updates');
+const view = require('./view');
 const launcher = require('./launcher'); // общий реестр (наполняет main.js)
 
 /* ---------------- обновления во время работы ---------------- */
@@ -27,11 +33,11 @@ const updateName = (kind) => (kind === 'launcher' ? 'DeepSeek Harness Launcher' 
 // checks — ответы проверки при запуске (updateChecks), иначе — запросить заново.
 async function findUpdates(checks) {
   const [l, d] = await Promise.all(checks ? [checks.launcher, checks.dsh] : [
-    timedCheck(launcher.fetchLauncherLatest(), launcher.UPDATE_CHECK_TIMEOUT),
-    timedCheck(launcher.fetchDshLatest(), launcher.UPDATE_CHECK_TIMEOUT),
+    timedCheck(updates.fetchLauncherLatest(), updates.UPDATE_CHECK_TIMEOUT),
+    timedCheck(updates.fetchDshLatest(), updates.UPDATE_CHECK_TIMEOUT),
   ]);
   const found = {};
-  const lInst = await launcher.launcherInstalledVersion();
+  const lInst = await updates.launcherInstalledVersion();
   if (l && l.version && lInst && compareDebianVer(tagToPackageVersion(l.version), lInst) > 0) {
     found.launcher = { version: l.version, installed: lInst, releases: l.releases };
   }
@@ -48,14 +54,14 @@ async function findUpdates(checks) {
 // Найденное → пункты меню; notify — ещё и плашка в окне.
 function setAvailableUpdates(found, notify) {
   const versions = { launcher: found.launcher && found.launcher.version, dsh: found.dsh && found.dsh.version };
-  const a = announceUpdates(versions, launcher.updatePrefs(), notifiedUpdates);
+  const a = announceUpdates(versions, updates.updatePrefs(), notifiedUpdates);
   const before = JSON.stringify(Object.entries(state.availableUpdates).map(([k, v]) => [k, v.version]));
   state.availableUpdates = found;
   if (JSON.stringify(Object.entries(found).map(([k, v]) => [k, v.version])) !== before) {
     for (const [kind, v] of Object.entries(a.menu)) {
       console.log(`[launcher] доступно обновление ${updateName(kind)} ${v} — пункт в меню «Справка»`);
     }
-    launcher.buildAppMenu();
+    menus.buildAppMenu();
   }
   for (const kind of a.notify) notifiedUpdates[kind] = versions[kind];
   if (notify && a.notify.length) showUpdateToast(a.notify);
@@ -64,7 +70,7 @@ function setAvailableUpdates(found, notify) {
 // После вопросов при старте: отложенное («Не сейчас») — пунктом в меню, без
 // уведомления (о нём только что спросили).
 async function refreshAvailableUpdates() {
-  if (launcher.NO_UPDATE_CHECK) return;
+  if (updates.NO_UPDATE_CHECK) return;
   try { setAvailableUpdates(await findUpdates(state.updateChecks), false); }
   catch (e) { console.error('[launcher] проверка обновлений:', e.message); }
 }
@@ -85,7 +91,7 @@ function setUpdatePolling(on) {
 }
 
 async function pollUpdates() {
-  if (state.stopping || state.launching || state.restarting || state.relaunchRequested || launcher.updateState.running) return;
+  if (state.stopping || state.launching || state.restarting || state.relaunchRequested || updates.updateState.running) return;
   try {
     const found = await findUpdates();
     if (!state.stopping) setAvailableUpdates(found, true);
@@ -138,7 +144,7 @@ function updateToastUrl(kinds) {
 function placeToast() {
   if (!toastView || !state.win || state.win.isDestroyed()) return;
   const [cw] = state.win.getContentSize();
-  const y = 10 + (state.findView && state.findView.getVisible() ? launcher.FIND_H + 8 : 0);
+  const y = 10 + (state.findView && state.findView.getVisible() ? view.FIND_H + 8 : 0);
   toastView.setBounds({ x: Math.max(0, cw - TOAST_W - 18), y, width: Math.min(TOAST_W, cw), height: TOAST_H });
 }
 
@@ -178,7 +184,7 @@ function onToastRequest(route, url) {
     void shell.openPath(fs.existsSync(LAUNCHER_LOG_FILE) ? LAUNCHER_LOG_FILE : LOG_DIR);
   } else if (route.startsWith('/toast/report/')) {
     closeUpdateToast();
-    void launcher.saveReport();
+    void diagnostics.saveReport();
   }
   return launcher.noContentResponse();
 }
@@ -189,13 +195,13 @@ function showUpdateNowDialog(kind) {
   if (!u) return;
   const name = updateName(kind);
   const title = tr(`Обновление ${name}`, `${name} update`);
-  const gen = launcher.openDialog(title);
+  const gen = dialogs.openDialog(title);
   if (gen === null) return;
   state.dialogCopyText = '';
-  launcher.dialogShow(gen, () => launcher.dialogPage(title, `
+  dialogs.dialogShow(gen, () => dialogs.dialogPage(title, `
     <p>${tr(`Доступна версия <code>${esc(u.version)}</code> (установлена <code>${esc(u.installed)}</code>).`,
             `Version <code>${esc(u.version)}</code> is available (installed: <code>${esc(u.installed)}</code>).`)}</p>
-    ${kind === 'launcher' ? launcher.notesBlockHtml(notesBetween(u.releases, u.installed, u.version, 'deb')) : ''}
+    ${kind === 'launcher' ? updates.notesBlockHtml(notesBetween(u.releases, u.installed, u.version, 'deb')) : ''}
     <p class="hint">${tr('Лаунчер перезапустится, dsh будет остановлен — незаконченный ответ агента прервётся.',
                          'The launcher will restart and dsh will be stopped — an unfinished agent reply will be interrupted.')}</p>
     <div class="actions">
@@ -207,7 +213,7 @@ function showUpdateNowDialog(kind) {
 function updateNow(kind) {
   if (!state.availableUpdates[kind]) return;
   process.env.DSH_LAUNCHER_UPDATE_NOW = kind; // новый экземпляр — сразу к установке
-  launcher.relaunchLauncher(`чтобы обновить ${updateName(kind)} до ${state.availableUpdates[kind].version}`);
+  settingsWindow.relaunchLauncher(`чтобы обновить ${updateName(kind)} до ${state.availableUpdates[kind].version}`);
 }
 
-module.exports = { setAvailableUpdates, refreshAvailableUpdates, setUpdatePolling, toastPageUrl, placeToast, showToast, onToastRequest, showUpdateNowDialog, updateNow };
+Object.assign(module.exports, { setAvailableUpdates, refreshAvailableUpdates, setUpdatePolling, toastPageUrl, placeToast, showToast, onToastRequest, showUpdateNowDialog, updateNow }); // дополняем, а не заменяем: модули подключают друг друга по кругу

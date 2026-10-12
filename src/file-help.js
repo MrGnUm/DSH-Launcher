@@ -7,6 +7,9 @@ const i18n = require('./i18n');
 const { tr } = i18n;
 const { gpuStatus } = require('./ui');
 const { CONFIG, LOG_DIR } = require('./env');
+const dshStop = require('./dsh-stop');
+const launch = require('./launch');
+const pages = require('./pages');
 const launcher = require('./launcher'); // общий реестр (наполняет main.js)
 
 /* ---------------- «Файл» / «Справка»: перезапуск dsh, папка логов ---------------- */
@@ -51,16 +54,16 @@ async function restartDsh({ confirm = true } = {}) {
   state.restartingDsh = true;
   state.launching = true; // watchdog не трогает окно, пока порт падает и поднимается
   try {
-    launcher.showPage(() => launcher.showStatus(tr('Перезапуск dsh…', 'Restarting dsh…'),
+    pages.showPage(() => pages.showStatus(tr('Перезапуск dsh…', 'Restarting dsh…'),
       tr('<p>Останавливаю <code>dsh</code> и запускаю заново…</p>', '<p>Stopping <code>dsh</code> and starting it again…</p>'), false));
-    if (state.adoptedDsh) await launcher.stopAdoptedDsh(); else await launcher.stopDsh();
+    if (state.adoptedDsh) await dshStop.stopAdoptedDsh(); else await dshStop.stopDsh();
     for (let i = 0; i < 50 && await launcher.portOpen(); i++) await launcher.sleep(100); // порт освободился
     state.weStartedDsh = false; state.adoptedDsh = false; state.adoptedOldPgid = null; state.dshProc = null; state.dshFatal = false;
   } finally {
     state.restartingDsh = false;
     state.launching = false;
   }
-  await launcher.launchDshInner();
+  await launch.launchDshInner();
 }
 
 
@@ -98,4 +101,4 @@ function onDialogGpuEnable() {
   return launcher.noContentResponse();
 }
 
-module.exports = { openLogsFolder, restartDsh, gpuStatusNow, gpuStatusText, onDialogGpuEnable };
+Object.assign(module.exports, { openLogsFolder, restartDsh, gpuStatusNow, gpuStatusText, onDialogGpuEnable }); // дополняем, а не заменяем: модули подключают друг друга по кругу

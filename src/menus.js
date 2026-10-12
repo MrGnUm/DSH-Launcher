@@ -8,7 +8,16 @@ const i18n = require('./i18n');
 const { tr } = i18n;
 const { contextMenuItems } = require('./ui');
 const { probeDsh } = require('./dsh-install');
-const launcher = require('./launcher'); // общий реестр (наполняет main.js)
+const diagnostics = require('./diagnostics');
+const dialogs = require('./dialogs');
+const dshLog = require('./dsh-log');
+const fileHelp = require('./file-help');
+const rollback = require('./rollback');
+const settingsWindow = require('./settings-window');
+const tray = require('./tray');
+const updatesLive = require('./updates-live');
+const updates = require('./updates');
+const view = require('./view');
 
 /* ---------------- меню окна: «О программе», «Проверить обновления» ---------------- */
 
@@ -31,20 +40,20 @@ const launcher = require('./launcher'); // общий реестр (наполн
 function appMenuTemplate() {
   const hint = (key) => ({ accelerator: key, registerAccelerator: false });
   const edit = (role, ru, en, key) => ({ role, label: tr(ru, en), ...hint('CmdOrCtrl+' + key) });
-  const view = (act, ru, en, key) => ({ label: tr(ru, en), click: () => launcher.viewActions[act](), ...hint(key) });
+  const viewItem = (act, ru, en, key) => ({ label: tr(ru, en), click: () => view.viewActions[act](), ...hint(key) });
   // найдено обновление (периодическая проверка или «Проверить обновления…») —
   // пункт «Обновить … до X…» в «Справке»
   const upd = (kind, name) => (state.availableUpdates[kind] ? [{
     label: tr(`Обновить ${name} до ${state.availableUpdates[kind].version}…`, `Update ${name} to ${state.availableUpdates[kind].version}…`),
-    click: () => launcher.showUpdateNowDialog(kind),
+    click: () => updatesLive.showUpdateNowDialog(kind),
   }] : []);
   return [
     {
       label: tr('Файл', 'File'),
       submenu: [
-        { label: tr('Настройки…', 'Settings…'), click: () => launcher.showSettingsDialog(), ...hint('CmdOrCtrl+,') },
+        { label: tr('Настройки…', 'Settings…'), click: () => settingsWindow.showSettingsDialog(), ...hint('CmdOrCtrl+,') },
         { type: 'separator' },
-        { label: tr('Перезапустить dsh…', 'Restart dsh…'), click: () => { void launcher.restartDsh(); } },
+        { label: tr('Перезапустить dsh…', 'Restart dsh…'), click: () => { void fileHelp.restartDsh(); } },
         { type: 'separator' },
         { label: tr('Выйти', 'Quit'), role: 'quit' },
       ],
@@ -62,17 +71,17 @@ function appMenuTemplate() {
     {
       label: tr('Вид', 'View'),
       submenu: [
-        view('reload', 'Перезагрузить', 'Reload', 'F5'),
-        view('reloadHard', 'Перезагрузить без кэша', 'Reload ignoring cache', 'CmdOrCtrl+Shift+R'),
+        viewItem('reload', 'Перезагрузить', 'Reload', 'F5'),
+        viewItem('reloadHard', 'Перезагрузить без кэша', 'Reload ignoring cache', 'CmdOrCtrl+Shift+R'),
         { type: 'separator' },
-        view('zoomIn', 'Увеличить', 'Zoom in', 'CmdOrCtrl+='),
-        view('zoomOut', 'Уменьшить', 'Zoom out', 'CmdOrCtrl+-'),
-        view('zoomReset', 'Обычный масштаб', 'Actual size', 'CmdOrCtrl+0'),
+        viewItem('zoomIn', 'Увеличить', 'Zoom in', 'CmdOrCtrl+='),
+        viewItem('zoomOut', 'Уменьшить', 'Zoom out', 'CmdOrCtrl+-'),
+        viewItem('zoomReset', 'Обычный масштаб', 'Actual size', 'CmdOrCtrl+0'),
         { type: 'separator' },
-        view('find', 'Найти на странице…', 'Find in page…', 'CmdOrCtrl+F'),
+        viewItem('find', 'Найти на странице…', 'Find in page…', 'CmdOrCtrl+F'),
         { type: 'separator' },
-        { label: tr('Проверка орфографии', 'Spell check'), type: 'checkbox', checked: state.spellcheckOn, click: (item) => launcher.setSpellcheck(item.checked) },
-        view('fullscreen', 'Полноэкранный режим', 'Full screen', 'F11'),
+        { label: tr('Проверка орфографии', 'Spell check'), type: 'checkbox', checked: state.spellcheckOn, click: (item) => view.setSpellcheck(item.checked) },
+        viewItem('fullscreen', 'Полноэкранный режим', 'Full screen', 'F11'),
       ],
     },
     {
@@ -81,13 +90,13 @@ function appMenuTemplate() {
         ...upd('launcher', 'DeepSeek Harness Launcher'),
         ...upd('dsh', 'dsh'),
         ...(state.availableUpdates.launcher || state.availableUpdates.dsh ? [{ type: 'separator' }] : []),
-        { label: tr('Проверить обновления…', 'Check for updates…'), click: () => { void launcher.showUpdateCheckDialog(); } },
-        { label: tr('Вернуть предыдущую версию…', 'Roll back to a previous version…'), click: () => { void launcher.showRollbackDialog(); } },
-        { label: tr('Журнал dsh…', 'dsh log…'), click: () => launcher.showLogDialog() },
-        { label: tr('Открыть папку логов', 'Open logs folder'), click: () => { void launcher.openLogsFolder(); } },
-        { label: tr('Сохранить отчёт…', 'Save report…'), click: () => { void launcher.saveReport(); } },
+        { label: tr('Проверить обновления…', 'Check for updates…'), click: () => { void dialogs.showUpdateCheckDialog(); } },
+        { label: tr('Вернуть предыдущую версию…', 'Roll back to a previous version…'), click: () => { void rollback.showRollbackDialog(); } },
+        { label: tr('Журнал dsh…', 'dsh log…'), click: () => dshLog.showLogDialog() },
+        { label: tr('Открыть папку логов', 'Open logs folder'), click: () => { void fileHelp.openLogsFolder(); } },
+        { label: tr('Сохранить отчёт…', 'Save report…'), click: () => { void diagnostics.saveReport(); } },
         { type: 'separator' },
-        { label: tr('О программе', 'About'), click: () => { void launcher.showAboutDialog(); } },
+        { label: tr('О программе', 'About'), click: () => { void dialogs.showAboutDialog(); } },
       ],
     },
   ];
@@ -97,7 +106,7 @@ function appMenuTemplate() {
 function buildAppMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(appMenuTemplate()));
   // На Linux setApplicationMenu ставит меню всем окнам — у окна-диалога его быть не должно.
-  if (state.tray) state.tray.setContextMenu(launcher.trayMenu());
+  if (state.tray) state.tray.setContextMenu(tray.trayMenu());
 }
 
 
@@ -141,7 +150,7 @@ function showContextMenu(params, w = state.win, wc = w && w.webContents) {
 // Версия лаунчера: пакетная установка — dpkg; сборка из исходников —
 // package.json (теперь синхронизирован с релизом, 1.2.0+).
 async function launcherVersionRaw() {
-  if (process.execPath.startsWith('/opt/dsh-launcher/')) return launcher.launcherInstalledVersion();
+  if (process.execPath.startsWith('/opt/dsh-launcher/')) return updates.launcherInstalledVersion();
   try { return require('./package.json').version; } catch { return null; }
 }
 
@@ -156,7 +165,7 @@ function dshPackageVersion(bin) {
     for (let d = path.dirname(fs.realpathSync(bin)); d !== path.dirname(d); d = path.dirname(d)) {
       let j;
       try { j = JSON.parse(fs.readFileSync(path.join(d, 'package.json'), 'utf8')); } catch { continue; }
-      if (j && j.name === launcher.DSH_NPM_PKG && j.version) return String(j.version);
+      if (j && j.name === updates.DSH_NPM_PKG && j.version) return String(j.version);
     }
   } catch { /* программы нет */ }
   return null;
@@ -172,4 +181,4 @@ async function dshVersionRaw() {
   return null;
 }
 
-module.exports = { buildAppMenu, showContextMenu, launcherVersionRaw, dshVersionRaw };
+Object.assign(module.exports, { buildAppMenu, showContextMenu, launcherVersionRaw, dshVersionRaw }); // дополняем, а не заменяем: модули подключают друг друга по кругу

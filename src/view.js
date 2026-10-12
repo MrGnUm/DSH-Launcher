@@ -7,6 +7,9 @@ const state = require('./state');
 const i18n = require('./i18n');
 const { tr } = i18n;
 const { esc } = require('./util');
+const menus = require('./menus');
+const settingsWindow = require('./settings-window');
+const updatesLive = require('./updates-live');
 const launcher = require('./launcher'); // общий реестр (наполняет main.js)
 
 /* ---------------- «Вид»: перезагрузка, масштаб, поиск, полный экран ---------------- */
@@ -41,7 +44,7 @@ const viewActions = {
   findNext: () => findStep(true),
   findPrev: () => findStep(false),
   fullscreen: () => state.win.setFullScreen(!state.win.isFullScreen()),
-  settings: () => launcher.showSettingsDialog(),
+  settings: () => settingsWindow.showSettingsDialog(),
 };
 
 
@@ -113,7 +116,7 @@ function openFind() {
   }
   placeFind();
   state.findView.setVisible(true);
-  launcher.placeToast();
+  updatesLive.placeToast();
   state.findView.webContents.focus();
   state.findView.webContents.executeJavaScript("document.getElementById('q') && document.getElementById('q').select()").catch(() => {});
 }
@@ -134,7 +137,7 @@ function closeFind() {
   if (!state.findView || !state.win || state.win.isDestroyed()) return;
   state.win.webContents.stopFindInPage('keepSelection');
   state.findView.setVisible(false);
-  launcher.placeToast();
+  updatesLive.placeToast();
   state.win.webContents.focus();
 }
 
@@ -165,7 +168,7 @@ function setSpellcheck(on) {
   session.defaultSession.setSpellCheckerEnabled(on);
   try { fs.writeFileSync(spellFile(), JSON.stringify({ enabled: on })); } catch { /* noop */ }
   console.log(`[launcher] проверка орфографии: ${on ? 'вкл' : 'выкл'}`);
-  launcher.buildAppMenu(); // галочка в «Виде»
+  menus.buildAppMenu(); // галочка в «Виде»
 }
 
-module.exports = { zoomFile, viewActions, FIND_H, onFindRequest, initSpellcheck, setSpellcheck };
+Object.assign(module.exports, { zoomFile, viewActions, FIND_H, onFindRequest, initSpellcheck, setSpellcheck }); // дополняем, а не заменяем: модули подключают друг друга по кругу

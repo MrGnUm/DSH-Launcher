@@ -8,6 +8,7 @@ const i18n = require('./i18n');
 const { tr } = i18n;
 const { esc } = require('./util');
 const { PLAIN_URL, LANG_FORCED } = require('./env');
+const menus = require('./menus');
 const launcher = require('./launcher'); // общий реестр (наполняет main.js)
 
 /* ---------------- страницы-статусы ---------------- */
@@ -55,6 +56,9 @@ const PAGE_CSS = `
   html.ovl,html.ovl body{background:transparent}
   html.ovl body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;
     background:rgba(0,0,0,.55);animation:ovlin .12s ease-out}
+  /* всплывающее «Сохранено» и ошибки — в углу карточки, а не всего окна */
+  html.ovl .wrap{position:relative}
+  html.ovl .dlg .pop,html.ovl .pop{position:absolute}
   html.ovl .wrap{width:min(760px,calc(100vw - 48px));height:min(580px,calc(100vh - 48px));
     background:#0f1115;border:1px solid #2a3550;border-radius:14px;box-shadow:0 18px 60px rgba(0,0,0,.6)}
   @keyframes ovlin{from{opacity:0}to{opacity:1}}
@@ -141,7 +145,7 @@ function onLangSwitch(lang) {
     } catch (e) { console.error('[launcher] ui-lang.json:', e.message); }
     console.log(`[launcher] язык окна: ${lang}`);
   }
-  launcher.buildAppMenu(); // подписи меню на новом языке
+  menus.buildAppMenu(); // подписи меню на новом языке
   if (state.currentPage) state.currentPage();
   return launcher.blankResponse();
 }
@@ -202,4 +206,4 @@ function showPastePage() {
   showStatus(tr('Нужен токен', 'Token required'), body, true);
 }
 
-module.exports = { pageHtml, stderrBlock, showPage, langPrefFile, loadLangPref, onLangSwitch, loadInWin, showStatus, showPastePage };
+Object.assign(module.exports, { pageHtml, stderrBlock, showPage, langPrefFile, loadLangPref, onLangSwitch, loadInWin, showStatus, showPastePage }); // дополняем, а не заменяем: модули подключают друг друга по кругу

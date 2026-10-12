@@ -6,7 +6,7 @@ const state = require('./state');
 const i18n = require('./i18n');
 const { tr } = i18n;
 const { loadSettings, PLAIN_URL } = require('./env');
-const launcher = require('./launcher'); // общий реестр (наполняет main.js)
+const fileHelp = require('./file-help');
 
 /* ---------------- трей и работа в фоне ---------------- */
 
@@ -46,7 +46,7 @@ function makeTrayIcons() {
 function trayMenu() {
   return Menu.buildFromTemplate([
     { label: tr('Открыть DeepSeek Harness', 'Open DeepSeek Harness'), click: () => showMainWindow() },
-    { label: tr('Перезапустить dsh…', 'Restart dsh…'), click: () => { showMainWindow(); void launcher.restartDsh(); } },
+    { label: tr('Перезапустить dsh…', 'Restart dsh…'), click: () => { showMainWindow(); void fileHelp.restartDsh(); } },
     { type: 'separator' },
     { label: tr('Выйти', 'Quit'), click: () => app.quit() },
   ]);
@@ -161,4 +161,4 @@ async function pollAgentState() {
   if (attentionSoundOn()) playAgentSound();
 }
 
-module.exports = { closeToTrayOn, attentionOn, attentionSoundOn, trayMenu, setTray, setTrayAttention, showMainWindow, onMainWindowClose, AGENT_POLL_MS, playAgentSound, pollAgentState };
+Object.assign(module.exports, { closeToTrayOn, attentionOn, attentionSoundOn, trayMenu, setTray, setTrayAttention, showMainWindow, onMainWindowClose, AGENT_POLL_MS, playAgentSound, pollAgentState }); // дополняем, а не заменяем: модули подключают друг друга по кругу

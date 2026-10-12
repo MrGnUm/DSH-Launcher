@@ -6,7 +6,7 @@ const i18n = require('./i18n');
 const { tr } = i18n;
 const { esc, redactLog } = require('./util');
 const { LOG_FILE } = require('./env');
-const launcher = require('./launcher'); // общий реестр (наполняет main.js)
+const dialogs = require('./dialogs');
 
 /* ---------------- журнал dsh ---------------- */
 
@@ -33,7 +33,7 @@ function logTail(file, maxLines = 300, maxBytes = 256 * 1024) {
 
 function showLogDialog() {
   const title = tr('Журнал dsh', 'dsh log');
-  const gen = launcher.openDialog(title);
+  const gen = dialogs.openDialog(title);
   if (gen === null) return;
   const render = (copied) => {
     const raw = logTail(LOG_FILE);
@@ -48,12 +48,12 @@ function showLogDialog() {
         <button onclick="location.href='dshlauncher://dialog/log-refresh/'">${tr('Обновить', 'Refresh')}</button>
         ${text ? '<button onclick="location.href=\'dshlauncher://dialog/copy/\'">' + (copied ? tr('Скопировано', 'Copied') : tr('Скопировать', 'Copy')) + '</button>' : ''}
         <button onclick="location.href='dshlauncher://dialog/logs/'">${tr('Папка логов', 'Logs folder')}</button>
-        ${launcher.dialogCloseButton()}
+        ${dialogs.dialogCloseButton()}
       </div>
       <script>const l = document.querySelector('pre.log'); if (l) l.scrollTop = l.scrollHeight;</script>`;
-    launcher.dialogPage(title, body);
+    dialogs.dialogPage(title, body);
   };
-  launcher.dialogShow(gen, render);
+  dialogs.dialogShow(gen, render);
 }
 
-module.exports = { logTail, showLogDialog };
+Object.assign(module.exports, { logTail, showLogDialog }); // дополняем, а не заменяем: модули подключают друг друга по кругу

@@ -12,6 +12,13 @@ The `## [X.Y.Z]` section becomes the description of the `vX.Y.Z` GitHub release.
 - **Static code check (ESLint)** — in `npm test` and in CI before every
   build: unknown names, unused imports, unreachable code. The leftovers of
   the refactoring it found (unused imports) are removed.
+- **Modules call each other directly** (`pages.showPage()` etc.) instead of
+  the shared registry; the registry is left for what lives in `main.js`.
+
+### Fixed
+
+- **“Saved” in Settings** popped up in the corner of the whole window,
+  outside the dialog card; now it's in the card's corner.
 
 ## [1.13.0] — 2026-10-12
 

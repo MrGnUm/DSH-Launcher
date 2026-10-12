@@ -6,7 +6,7 @@ const { tr } = i18n;
 const { esc } = require('./util');
 const { DSH_BIN_DEFAULT, DSH_BIN_EXPLICIT } = require('./env');
 const { dshInstallCheck, MIN_NODE_MAJOR, npmInstallInfo } = require('./dsh-install');
-const launcher = require('./launcher'); // общий реестр (наполняет main.js)
+const pages = require('./pages');
 
 /* ---------------- страница «dsh не установлен» ----------------
  * Порт закрыт и бинарника dsh нет — вместо попытки старта и ENOENT показываем
@@ -69,7 +69,7 @@ async function showInstallPage(note, noteIsError = false) {
       ${installing ? '' : (npmInfo.canAuto ? `<button onclick="location.href='dshlauncher://install/run/'">${tr('Установить', 'Install')}</button>` : '')}
       <button onclick="location.href='dshlauncher://install/recheck/'">${tr('Проверить ещё раз', 'Check again')}</button>
     </div>`;
-  launcher.showStatus(installing ? tr('Устанавливаю dsh…', 'Installing dsh…') : tr('Нужен DeepSeek Harness', 'DeepSeek Harness is required'), body, !installing);
+  pages.showStatus(installing ? tr('Устанавливаю dsh…', 'Installing dsh…') : tr('Нужен DeepSeek Harness', 'DeepSeek Harness is required'), body, !installing);
 }
 
-module.exports = { installState, refreshInstallState, showInstallPage };
+Object.assign(module.exports, { installState, refreshInstallState, showInstallPage }); // дополняем, а не заменяем: модули подключают друг друга по кругу

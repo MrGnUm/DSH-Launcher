@@ -11,6 +11,15 @@ const { tr } = i18n;
 const { esc, profileFromArgs } = require('./util');
 const { DEFAULT_PORT, DEFAULT_PROFILE, effectiveConfig, settingValue, restartNeeded } = require('./config');
 const { SETTINGS_FILE, loadSettings, CONFIG, CWD, LANG_FORCED } = require('./env');
+const dialogs = require('./dialogs');
+const dshProcess = require('./dsh-process');
+const fileHelp = require('./file-help');
+const menus = require('./menus');
+const pages = require('./pages');
+const tray = require('./tray');
+const updatesLive = require('./updates-live');
+const updates = require('./updates');
+const view = require('./view');
 const launcher = require('./launcher'); // общий реестр (наполняет main.js)
 
 /* ---------------- окно «Настройки» ---------------- */
@@ -32,21 +41,21 @@ function saveSettings(patch) {
 
 function setLanguage(lang) {
   if (lang === 'auto') {
-    try { fs.rmSync(launcher.langPrefFile(), { force: true }); } catch { /* noop */ }
+    try { fs.rmSync(pages.langPrefFile(), { force: true }); } catch { /* noop */ }
     i18n.setLang(/^ru/i.test(process.env.LC_ALL || process.env.LC_MESSAGES || process.env.LANG || '') ? 'ru' : 'en');
-    launcher.buildAppMenu();
+    menus.buildAppMenu();
     if (state.currentPage) state.currentPage();
   } else {
-    launcher.onLangSwitch(lang);
+    pages.onLangSwitch(lang);
   }
 }
 
 function langSetting() {
-  try { JSON.parse(fs.readFileSync(launcher.langPrefFile(), 'utf8')); return i18n.getLang(); } catch { return 'auto'; }
+  try { JSON.parse(fs.readFileSync(pages.langPrefFile(), 'utf8')); return i18n.getLang(); } catch { return 'auto'; }
 }
 
 function updateDismissals() {
-  const p = launcher.updatePrefs();
+  const p = updates.updatePrefs();
   return Object.keys(p).filter((k) => p[k]).map((k) => `${k === 'launcher' ? 'DeepSeek Harness Launcher' : 'dsh'} ${p[k]}`);
 }
 
@@ -61,15 +70,15 @@ function onSettingsSet(url) {
   } else {
     try {
       if (key === 'lang') setLanguage(r.value);
-      else if (key === 'spellcheck') launcher.setSpellcheck(r.value);
+      else if (key === 'spellcheck') view.setSpellcheck(r.value);
       else if (key === 'gpu' || key === 'ozone') saveSettings({ [key]: r.value === 'auto' ? null : r.value });
       else if (key === 'port') saveSettings({ port: r.value === DEFAULT_PORT ? null : r.value });
       else if (key === 'profile') saveSettings({ profile: r.value === DEFAULT_PROFILE ? null : r.value });
       else if (key === 'checkUpdates') saveSettings({ checkUpdates: r.value ? null : false });
-      else if (key === 'pollUpdates') { saveSettings({ pollUpdates: r.value ? null : false }); launcher.setUpdatePolling(r.value); }
-      else if (key === 'closeToTray') { saveSettings({ closeToTray: r.value ? true : null }); launcher.setTray(r.value); }
+      else if (key === 'pollUpdates') { saveSettings({ pollUpdates: r.value ? null : false }); updatesLive.setUpdatePolling(r.value); }
+      else if (key === 'closeToTray') { saveSettings({ closeToTray: r.value ? true : null }); tray.setTray(r.value); }
       else if (key === 'attention') saveSettings({ attention: r.value ? null : false });
-      else if (key === 'attentionSound') { saveSettings({ attentionSound: r.value ? true : null }); if (r.value && state.win) launcher.playAgentSound(); } // сразу — услышать
+      else if (key === 'attentionSound') { saveSettings({ attentionSound: r.value ? true : null }); if (r.value && state.win) tray.playAgentSound(); } // сразу — услышать
       else saveSettings({ [key]: r.value || null }); // dshPath, cwd: '' — по умолчанию
       console.log(`[launcher] настройки: ${key} = ${key === 'dshPath' || key === 'cwd' ? (r.value || '(по умолчанию)') : r.value}`);
       settingsNote = { text: tr('Сохранено', 'Saved'), error: false };
@@ -82,7 +91,7 @@ function onSettingsSet(url) {
 }
 
 async function onSettingsPick(kind) {
-  if (!launcher.dialogOpen()) return launcher.noContentResponse();
+  if (!dialogs.dialogOpen()) return launcher.noContentResponse();
   const isDir = kind === 'cwd';
   const r = await dialog.showOpenDialog(state.win, {
     title: isDir ? tr('Рабочая папка dsh', 'dsh working folder') : tr('Программа dsh', 'The dsh program'),
@@ -96,7 +105,7 @@ async function onSettingsPick(kind) {
 }
 
 function onSettingsResetUpdates() {
-  try { fs.writeFileSync(launcher.updatePrefFile(), '{}'); } catch { /* noop */ }
+  try { fs.writeFileSync(updates.updatePrefFile(), '{}'); } catch { /* noop */ }
   console.log('[launcher] настройки: снова спрашивать об обновлениях');
   settingsNote = { text: tr('Об отложенных обновлениях лаунчер снова спросит при запуске.', 'The launcher will ask about postponed updates again at startup.'), error: false };
   if (state.dialogRender) state.dialogRender(false);
@@ -124,7 +133,7 @@ function relaunchLauncher(why = 'чтобы применить настройк�
 // процесс выйдет (до 20 с), и exec — тот же pid.
 // $0 — pid этого процесса, "$@" — команда нового экземпляра.
 function spawnLauncherAfterExit(cmd, args, stdio) {
-  const script = launcher.CLOSE_INHERITED_FDS +
+  const script = dshProcess.CLOSE_INHERITED_FDS +
     'i=0; while kill -0 "$0" 2>/dev/null && [ $i -lt 200 ]; do sleep 0.1; i=$((i+1)); done; exec "$@"';
   return spawn('/bin/bash', ['-c', script, String(process.pid), cmd, ...args], { detached: true, stdio, env: process.env });
 }
@@ -143,7 +152,7 @@ const SETTINGS_SECTIONS = ['general', 'updates', 'dsh', 'window', 'graphics'];
 
 function showSettingsDialog() {
   const title = tr('Настройки', 'Settings');
-  const gen = launcher.openDialog(title);
+  const gen = dialogs.openDialog(title);
   if (gen === null) return;
   settingsNote = null;
   state.dialogCopyText = '';
@@ -159,7 +168,7 @@ function showSettingsDialog() {
       `<label class="chk"><input type="checkbox" id="${key}"${on ? ' checked' : ''}${disabled ? ' disabled' : ''}
         onchange="set('${key}', this.checked)"> ${esc(label)}</label>`;
     const dismissed = updateDismissals();
-    const gpu = launcher.gpuStatusNow();
+    const gpu = fileHelp.gpuStatusNow();
     const dshShown = next.dshBin || tr(`автоматически (сейчас: ${state.dshBin})`, `automatic (now: ${state.dshBin})`);
     const body = `
       ${pending.length ? `<div class="banner">${tr('Изменения вступят в силу после перезапуска лаунчера.', 'Changes take effect after the launcher restarts.')}
@@ -203,17 +212,17 @@ function showSettingsDialog() {
           ${envNote('port', 'DSH_PORT')}</div>
           </section>
           <section id="sec-window" class="form"${state.settingsSection === 'window' ? '' : ' hidden'}>
-        <div class="row">${check('closeToTray', launcher.closeToTrayOn(), tr('Крестик прячет окно в трей — dsh работает дальше', 'The close button hides the window to the tray — dsh keeps running'))}</div>
+        <div class="row">${check('closeToTray', tray.closeToTrayOn(), tr('Крестик прячет окно в трей — dsh работает дальше', 'The close button hides the window to the tray — dsh keeps running'))}</div>
         <p class="hint">${tr('Нужен трей на рабочем столе (в GNOME — расширение AppIndicator, в Ubuntu оно есть). Спрятанное окно вернёт и повторный запуск лаунчера.',
                              'Needs a system tray on the desktop (in GNOME — the AppIndicator extension, included in Ubuntu). Starting the launcher again also brings the hidden window back.')}</p>
-        <div class="row">${check('attention', launcher.attentionOn(), tr('Сообщать, когда агент закончил ответ, а окно не в фокусе (уведомление, точка на значке трея)', 'Tell me when the agent finishes and the window is not focused (a notification, a dot on the tray icon)'))}</div>
-        <div class="row">${check('attentionSound', launcher.attentionSoundOn(), tr('…и звуком', '…and with a sound'))}</div>
+        <div class="row">${check('attention', tray.attentionOn(), tr('Сообщать, когда агент закончил ответ, а окно не в фокусе (уведомление, точка на значке трея)', 'Tell me when the agent finishes and the window is not focused (a notification, a dot on the tray icon)'))}</div>
+        <div class="row">${check('attentionSound', tray.attentionSoundOn(), tr('…и звуком', '…and with a sound'))}</div>
           </section>
           <section id="sec-graphics" class="form"${state.settingsSection === 'graphics' ? '' : ' hidden'}>
         <div class="row"><span>${tr('GPU-ускорение', 'GPU acceleration')}</span>
           ${sel('gpu', next.noGpu ? 'off' : 'auto', [['auto', tr('Авто', 'Auto')], ['off', tr('Выключено', 'Off')]])}
           ${envNote('gpu', 'DSH_LAUNCHER_NO_GPU')}</div>
-        <div class="row"><span class="hint">${tr('Сейчас:', 'Now:')} ${esc(launcher.gpuStatusText(gpu))}</span>
+        <div class="row"><span class="hint">${tr('Сейчас:', 'Now:')} ${esc(fileHelp.gpuStatusText(gpu))}</span>
           ${gpu.marker ? `<button onclick="location.href='dshlauncher://dialog/gpu-enable/'">${tr('Включить GPU снова', 'Re-enable GPU')}</button>` : ''}</div>
         <div class="row"><span>${tr('Окно на Wayland', 'Window on Wayland')}</span>
           ${sel('ozone', next.ozone, [['auto', tr('Авто', 'Auto')], ['wayland', 'Wayland'], ['x11', tr('X11 (XWayland) — если окна не видно', 'X11 (XWayland) — if the window is invisible')]])}
@@ -221,7 +230,7 @@ function showSettingsDialog() {
           </section>
         </div>
       </div>
-      <div class="actions">${launcher.dialogCloseButton()}</div>
+      <div class="actions">${dialogs.dialogCloseButton()}</div>
       <script>
         function set(k, v) { location.href = 'dshlauncher://settings/set/?k=' + encodeURIComponent(k) + '&v=' + encodeURIComponent(v); }
         function go(r) { location.href = 'dshlauncher://settings/' + r + '/'; }
@@ -232,9 +241,9 @@ function showSettingsDialog() {
           location.href = 'dshlauncher://settings/section/?s=' + id;
         }
       </script>`;
-    launcher.dialogPage(title, body);
+    dialogs.dialogPage(title, body);
   };
-  launcher.dialogShow(gen, render);
+  dialogs.dialogShow(gen, render);
 }
 
-module.exports = { onSettingsSet, onSettingsPick, onSettingsResetUpdates, relaunchLauncher, spawnLauncherAfterExit, spawnNewInstance, SETTINGS_SECTIONS, showSettingsDialog };
+Object.assign(module.exports, { onSettingsSet, onSettingsPick, onSettingsResetUpdates, relaunchLauncher, spawnLauncherAfterExit, spawnNewInstance, SETTINGS_SECTIONS, showSettingsDialog }); // дополняем, а не заменяем: модули подключают друг друга по кругу
