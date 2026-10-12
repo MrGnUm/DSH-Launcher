@@ -31,20 +31,20 @@ const HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
   html,body{margin:0;width:${W}px;height:${H}px;overflow:hidden}
   body{background:radial-gradient(1100px 700px at 18% 30%, #1b2333 0%, #0f1115 70%);
     font-family:'Ubuntu','Noto Sans','DejaVu Sans',system-ui,sans-serif;color:#e6ebf4;
-    display:flex;align-items:center;gap:72px;padding:0 110px;box-sizing:border-box}
+    display:flex;align-items:center;gap:60px;padding:0 90px;box-sizing:border-box}
   svg{flex:none;filter:drop-shadow(0 24px 48px rgba(0,0,0,.55))}
-  h1{margin:0 0 18px;font-size:76px;font-weight:700;letter-spacing:-1px;line-height:1.05}
+  h1{margin:0 0 20px;font-size:68px;font-weight:700;letter-spacing:-1px;line-height:1.05}
   h1 span{background:linear-gradient(180deg,#6aa4ff,#8b5cf6);-webkit-background-clip:text;color:transparent}
-  p{margin:0 0 30px;font-size:32px;line-height:1.35;color:#9aa4b2}
-  .tags{display:flex;gap:12px;flex-wrap:wrap}
-  .tags b{font-weight:500;font-size:22px;color:#c7d2fe;background:#1a2130;border:1px solid #2a3550;
-    border-radius:999px;padding:8px 18px}
+  p{margin:0 0 30px;font-size:30px;line-height:1.35;color:#9aa4b2}
+  .tags{display:flex;gap:10px;flex-wrap:wrap}
+  .tags b{font-weight:500;font-size:21px;color:#c7d2fe;background:#1a2130;border:1px solid #2a3550;
+    border-radius:999px;padding:8px 15px}
 </style></head><body>
   ${ICON_SVG}
   <div>
-    <h1><span>DSH</span> Launcher</h1>
-    <p>Desktop window for DeepSeek Harness —<br>starts <code style="font-family:inherit;color:#c7d2fe">dsh web</code> and keeps it in check</p>
-    <div class="tags"><b>Electron</b><b>Ubuntu .deb</b><b>RU / EN</b></div>
+    <h1><span>DeepSeek Harness</span><br>Launcher</h1>
+    <p>Your DeepSeek Harness in a desktop window —<br>starts, updates and stops <code style="font-family:inherit;color:#c7d2fe">dsh</code> for you</p>
+    <div class="tags"><b>Ubuntu · Debian .deb</b><b>Wayland · X11</b><b>Auto-updates</b><b>RU / EN</b></div>
   </div>
 </body></html>`;
 
